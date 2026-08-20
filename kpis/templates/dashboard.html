@@ -1,0 +1,232 @@
+{% extends 'base.html' %}
+{% block title %}Tableau de bord — KPI BTE{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+    .zone-graphique { position: relative; height: 280px; }
+    .zone-graphique-haute { position: relative; height: 420px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>Tableau de bord</h2>
+        <p class="sous-titre">{{ agence }} · Exercice {{ annee }}</p>
+    </div>
+</div>
+
+<form method="get" class="barre-filtres">
+    <div class="row g-3 align-items-end">
+        <div class="col-auto">
+            <label class="form-label">Année</label>
+            <select name="annee" class="form-select form-select-sm">
+                {% for a in annees_dispo %}
+                    <option value="{{ a }}" {% if a == annee %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if agences_dispo %}
+        <div class="col-auto" style="min-width:260px;">
+            <label class="form-label">Agence</label>
+            <select name="agence" class="form-select form-select-sm">
+                <option value="">Toutes les agences</option>
+                {% for a in agences_dispo %}
+                    <option value="{{ a.id }}" {% if agence_selectionnee == a.id|stringformat:"s" %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <div class="col-auto">
+            <button type="submit" class="btn btn-principal btn-sm">Appliquer</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6 col-sm-6">
+        <div class="tuile">
+            <div class="tuile-libelle">Comptes clients</div>
+            <div class="tuile-valeur">{{ nb_comptes_total }}</div>
+        </div>
+    </div>
+    <div class="col-md-6 col-sm-6">
+        <div class="tuile accent-or">
+            <div class="tuile-libelle">Cartes vendues</div>
+            <div class="tuile-valeur">{{ nb_cartes_total }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-5">
+        <div class="carte h-100">
+            <div class="carte-entete">Répartition des comptes clients</div>
+            <div class="carte-corps">
+                <div class="zone-graphique"><canvas id="graphComptes"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="carte h-100">
+            <div class="carte-entete">Crédits par catégorie</div>
+            <div class="carte-corps">
+                <div class="zone-graphique"><canvas id="graphCredits"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="carte mb-4">
+    <div class="carte-entete">Ventes de cartes par type</div>
+    <div class="carte-corps">
+        <div class="zone-graphique-haute"><canvas id="graphCartes"></canvas></div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="carte h-100">
+            <div class="carte-entete">Détail — Comptes clients</div>
+            <table class="table">
+                <thead><tr><th>Catégorie</th><th class="text-end">Nombre</th></tr></thead>
+                <tbody>
+                {% for c in comptes_par_categorie %}
+                    <tr><td>{{ c.categorie__libelle }}</td><td class="cellule-nombre">{{ c.total }}</td></tr>
+                {% empty %}
+                    <tr><td colspan="2" class="table-vide">Aucune donnée pour {{ annee }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="carte h-100">
+            <div class="carte-entete">Placements</div>
+            <table class="table">
+                <thead><tr><th>Type</th><th class="text-end">Nombre</th></tr></thead>
+                <tbody>
+                {% for p in placements_par_type %}
+                    <tr><td>{{ p.type_placement__libelle }}</td><td class="cellule-nombre">{{ p.total }}</td></tr>
+                {% empty %}
+                    <tr><td colspan="2" class="table-vide">Aucune donnée pour {{ annee }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="carte">
+    <div class="carte-entete">Détail — Crédits</div>
+    <table class="table">
+        <thead>
+            <tr><th>Catégorie</th><th class="text-end">Nombre</th><th class="text-end">Montant total</th></tr>
+        </thead>
+        <tbody>
+        {% for c in credits_par_categorie %}
+            <tr>
+                <td>{{ c.categorie_label }}</td>
+                <td class="cellule-nombre">{{ c.total }}</td>
+                <td class="cellule-nombre">{{ c.montant_total }}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="3" class="table-vide">Aucune donnée pour {{ annee }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{{ donnees_graphiques|json_script:"donnees-graphiques" }}
+<script>
+(function () {
+    const donnees = JSON.parse(document.getElementById('donnees-graphiques').textContent);
+
+    const MARINE = '#1B2A5E';
+    const OR     = '#F5B700';
+    const ROUGE  = '#E30613';
+    const PALETTE = ['#1B2A5E','#F5B700','#E30613','#3E5A9E','#7A8AB8','#C89B00','#5B6B99','#A8B4D4'];
+
+    Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = '#78819A';
+
+    // --- Répartition des comptes (anneau) ---
+    if (donnees.comptes.labels.length) {
+        new Chart(document.getElementById('graphComptes'), {
+            type: 'doughnut',
+            data: {
+                labels: donnees.comptes.labels,
+                datasets: [{
+                    data: donnees.comptes.valeurs,
+                    backgroundColor: PALETTE,
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '58%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { padding: 14, boxWidth: 12, usePointStyle: true } }
+                }
+            }
+        });
+    }
+
+    // --- Crédits par catégorie (barres horizontales) ---
+    if (donnees.credits.labels.length) {
+        new Chart(document.getElementById('graphCredits'), {
+            type: 'bar',
+            data: {
+                labels: donnees.credits.labels,
+                datasets: [{
+                    label: 'Nombre',
+                    data: donnees.credits.valeurs,
+                    backgroundColor: MARINE,
+                    borderRadius: 5,
+                    barThickness: 20
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: '#EEF1F8' }, ticks: { precision: 0 } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // --- Cartes par type (barres verticales) ---
+    if (donnees.cartes.labels.length) {
+        new Chart(document.getElementById('graphCartes'), {
+            type: 'bar',
+            data: {
+                labels: donnees.cartes.labels,
+                datasets: [{
+                    label: 'Nombre vendu',
+                    data: donnees.cartes.valeurs,
+                    backgroundColor: OR,
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 45, font: { size: 10 } } },
+                    y: { grid: { color: '#EEF1F8' }, ticks: { precision: 0 } }
+                }
+            }
+        });
+    }
+})();
+</script>
+{% endblock %}

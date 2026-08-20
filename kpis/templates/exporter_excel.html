@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Export Excel — KPI BTE{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 style="color: var(--bte-marine);">Export des données</h2>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">Retour au tableau de bord</a>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card card-bte">
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label">Type de données</label>
+                        <select name="type_export" class="form-select" required>
+                            <option value="">-- Choisir --</option>
+                            {% for valeur, libelle in types_export %}
+                                <option value="{{ valeur }}">{{ libelle }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Année</label>
+                        <select name="annee" class="form-select" required>
+                            {% for a in annees_dispo %}
+                                <option value="{{ a }}" {% if a == annee_courante %}selected{% endif %}>{{ a }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Périmètre</label>
+                        <select name="agence" class="form-select">
+                            <option value="">Toutes les agences</option>
+                            {% for a in agences %}
+                                <option value="{{ a.id }}">{{ a }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-bte-primary w-100">Télécharger le fichier Excel</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="alert alert-light border small mt-3">
+            Le fichier est généré au format .xlsx, avec un onglet par type de données,
+            les noms d'agences en clair et une ligne de total.
+        </div>
+    </div>
+</div>
+{% endblock %}

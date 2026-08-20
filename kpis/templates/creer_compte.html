@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+{% block title %}Créer un compte — KPI BTE{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>{% if profil.est_super_admin %}Nouveau chef d'agence{% else %}Nouvel employé{% endif %}</h2>
+        <p class="sous-titre">
+            {% if profil.est_super_admin %}
+                Le compte aura accès aux données de l'agence choisie
+            {% else %}
+                Rattaché à {{ profil.agence }}
+            {% endif %}
+        </p>
+    </div>
+    <a href="{% url 'gerer_comptes' %}" class="btn btn-secondaire">Retour</a>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="carte">
+            <div class="carte-entete">Informations du compte</div>
+            <div class="carte-corps">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label">Identifiant</label>
+                        <input type="text" name="username" class="form-control" required autofocus>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Mot de passe</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+
+                    {% if profil.est_super_admin %}
+                        <div class="mb-3">
+                            <label class="form-label">Agence de rattachement</label>
+                            <select name="agence" class="form-select" required>
+                                <option value="">-- Choisir une agence --</option>
+                                {% for a in agences %}
+                                    <option value="{{ a.id }}">{{ a }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    {% else %}
+                        <label class="form-label">Droits accordés</label>
+                        <p style="font-size:12.5px; color:var(--texte-doux); margin-top:-2px;">
+                            L'employé pourra créer et modifier les données cochées. La suppression reste réservée au chef d'agence.
+                        </p>
+
+                        <div style="background:var(--bte-marine-pale); border-radius:8px; padding:14px 16px;">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" name="permissions" value="compte" class="form-check-input" id="p1">
+                                <label class="form-check-label" for="p1">Comptes clients</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" name="permissions" value="credit" class="form-check-input" id="p2">
+                                <label class="form-check-label" for="p2">Crédits</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" name="permissions" value="carte" class="form-check-input" id="p3">
+                                <label class="form-check-label" for="p3">Cartes</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" name="permissions" value="tpe" class="form-check-input" id="p4">
+                                <label class="form-check-label" for="p4">TPE</label>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input type="checkbox" name="permissions" value="placement" class="form-check-input" id="p5">
+                                <label class="form-check-label" for="p5">Placements</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" name="permissions" value="credoc" class="form-check-input" id="p6">
+                                <label class="form-check-label" for="p6">CREDOC</label>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-principal">Créer le compte</button>
+                        <a href="{% url 'gerer_comptes' %}" class="btn btn-secondaire">Annuler</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

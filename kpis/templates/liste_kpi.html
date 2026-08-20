@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}{{ label }} — KPI BTE{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 style="color: var(--bte-marine);">{{ label }}</h2>
+    <div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">Retour au tableau de bord</a>
+        {% if peut_saisir %}
+            <a href="{% url 'ajouter_kpi' type_kpi %}" class="btn btn-bte-primary btn-sm">+ Ajouter</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card card-bte">
+    <div class="card-body">
+        <table class="table table-bordered mb-0">
+            <tr><th>Détail</th><th>Action</th></tr>
+            {% for obj in objets %}
+            <tr>
+                <td>{{ obj }}</td>
+                <td>
+                    {% if peut_saisir %}
+                        <a href="{% url 'modifier_kpi' type_kpi obj.id %}" class="btn btn-warning btn-sm">Modifier</a>
+                    {% endif %}
+                    {% if peut_supprimer %}
+                        <a href="{% url 'supprimer_kpi' type_kpi obj.id %}" class="btn btn-danger btn-sm"
+                           onclick="return confirm('Supprimer cet élément ?')">Supprimer</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2" class="text-center text-muted">Aucune donnée pour le moment</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endblock %}

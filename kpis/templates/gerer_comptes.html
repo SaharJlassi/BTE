@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}Comptes utilisateurs — KPI BTE{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>{% if profil.est_super_admin %}Chefs d'agence{% else %}Employés{% endif %}</h2>
+        <p class="sous-titre">
+            {% if profil.est_super_admin %}
+                Gestion des responsables d'agence
+            {% else %}
+                {{ profil.agence }}
+            {% endif %}
+        </p>
+    </div>
+    <a href="{% url 'creer_compte' %}" class="btn btn-principal">
+        + {% if profil.est_super_admin %}Créer un chef d'agence{% else %}Créer un employé{% endif %}
+    </a>
+</div>
+
+<div class="carte">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Identifiant</th>
+                {% if profil.est_super_admin %}<th>Agence</th>{% else %}<th>Permissions</th>{% endif %}
+                <th>Statut</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for c in comptes %}
+            <tr>
+                <td><strong>{{ c.user.username }}</strong></td>
+                {% if profil.est_super_admin %}
+                    <td>{{ c.agence }}</td>
+                {% else %}
+                    <td style="font-size:13px; color:var(--texte-doux);">
+                        {% if c.peut_gerer_comptes %}Comptes · {% endif %}
+                        {% if c.peut_gerer_credits %}Crédits · {% endif %}
+                        {% if c.peut_gerer_cartes %}Cartes · {% endif %}
+                        {% if c.peut_gerer_tpe %}TPE · {% endif %}
+                        {% if c.peut_gerer_placements %}Placements · {% endif %}
+                        {% if c.peut_gerer_credoc %}CREDOC{% endif %}
+                    </td>
+                {% endif %}
+                <td>
+                    {% if c.user.is_active %}
+                        <span class="etiquette etiquette-active">Actif</span>
+                    {% else %}
+                        <span class="etiquette etiquette-suspendu">Suspendu</span>
+                    {% endif %}
+                </td>
+                <td class="text-end">
+                    {% if profil.est_super_admin %}
+                        <a href="{% url 'suspendre_compte' c.id %}" class="btn btn-secondaire btn-sm"
+                           onclick="return confirm('Changer le statut de ce compte ?')">
+                            {% if c.user.is_active %}Suspendre{% else %}Réactiver{% endif %}
+                        </a>
+                    {% endif %}
+                    <a href="{% url 'supprimer_compte' c.id %}" class="btn btn-danger-doux btn-sm"
+                       onclick="return confirm('Supprimer définitivement ce compte ?')">Supprimer</a>
+                </td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="4" class="table-vide">Aucun compte pour le moment</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

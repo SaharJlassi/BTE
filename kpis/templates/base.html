@@ -1,0 +1,332 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}KPI BTE{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Identité BTE */
+            --bte-marine:      #1B2A5E;
+            --bte-marine-fonce:#141F47;
+            --bte-rouge:       #E30613;
+            --bte-or:          #F5B700;
+
+            /* Déclinaisons douces */
+            --bte-marine-pale: #E4EAF6;
+            --bte-or-pale:     #FFF8E5;
+            --bte-rouge-pale:  #FDEDEE;
+
+            /* Neutres */
+            --fond:      #DCE4F5;
+            --surface:   #FFFFFF;
+            --bordure:  #DDE3EF;
+            --texte:     #2A3247;
+            --texte-doux:#78819A;
+
+            --rayon:  10px;
+            --ombre:   0 1px 3px rgba(27,42,94,.08), 0 6px 20px rgba(27,42,94,.07);
+            --largeur-sidebar: 244px;
+        }
+
+        * { box-sizing: border-box; }
+
+    body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(180deg, #CFDAF0 0%, #DCE4F5 380px, #DCE4F5 100%);
+            background-attachment: fixed;
+            color: var(--texte);
+            font-size: 14.5px;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        h1,h2,h3,h4,h5,h6 { color: var(--bte-marine); font-weight: 600; letter-spacing: -.01em; }
+
+        /* ---------- Barre latérale ---------- */
+        .sidebar {
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            width: var(--largeur-sidebar);
+            background: var(--bte-marine);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            z-index: 100;
+        }
+        .sidebar-logo {
+            padding: 18px 16px;
+            background: #fff;
+            margin: 14px;
+            border-radius: var(--rayon);
+            text-align: center;
+        }
+        .sidebar-logo img { max-width: 100%; height: auto; }
+
+        .sidebar-section {
+            padding: 16px 20px 6px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: rgba(255,255,255,.42);
+            font-weight: 600;
+        }
+
+        .sidebar-lien {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 20px;
+            color: rgba(255,255,255,.78);
+            text-decoration: none;
+            font-weight: 500;
+            border-left: 3px solid transparent;
+            transition: all .15s ease;
+        }
+        .sidebar-lien:hover {
+            background: rgba(255,255,255,.07);
+            color: #fff;
+        }
+        .sidebar-lien.actif {
+            background: rgba(255,255,255,.10);
+            color: #fff;
+            border-left-color: var(--bte-or);
+        }
+        .sidebar-lien .puce {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: currentColor; opacity: .5; flex: none;
+        }
+
+        .sidebar-pied {
+            margin-top: auto;
+            padding: 16px;
+            border-top: 1px solid rgba(255,255,255,.10);
+            background: var(--bte-marine);
+            position: sticky;
+            bottom: 0;
+        }
+        .sidebar-user {
+            color: #fff; font-weight: 600; font-size: 13.5px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .sidebar-role {
+            color: rgba(255,255,255,.5); font-size: 11.5px; margin-bottom: 10px;
+        }
+        .btn-deconnexion {
+            width: 100%;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,.28);
+            color: rgba(255,255,255,.85);
+            border-radius: 8px;
+            padding: 7px;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all .15s ease;
+        }
+        .btn-deconnexion:hover { background: #fff; color: var(--bte-marine); border-color: #fff; }
+
+        /* ---------- Contenu ---------- */
+        .zone-contenu {
+            margin-left: var(--largeur-sidebar);
+            padding: 26px 32px 48px;
+        }
+        .sans-sidebar .zone-contenu { margin-left: 0; padding: 0; }
+
+        .entete-page {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+        .entete-page h2 { margin: 0; font-size: 22px; }
+        .entete-page .sous-titre { color: var(--texte-doux); font-size: 13.5px; margin: 3px 0 0; }
+
+        /* ---------- Cartes ---------- */
+        .carte {
+            background: var(--surface);
+            border: 1px solid var(--bordure);
+            border-radius: var(--rayon);
+            box-shadow: var(--ombre);
+        }
+        .carte-entete {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--bordure);
+            font-weight: 600;
+            color: var(--bte-marine);
+            font-size: 14.5px;
+        }
+        .carte-corps { padding: 18px; }
+
+        /* Tuiles de statistiques */
+        .tuile {
+            background: var(--surface);
+            border: 1px solid var(--bordure);
+            border-radius: var(--rayon);
+            padding: 18px 20px;
+            box-shadow: var(--ombre);
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        .tuile::before {
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+            width: 3px; background: var(--bte-marine);
+        }
+        .tuile.accent-or::before    { background: var(--bte-or); }
+        .tuile.accent-rouge::before { background: var(--bte-rouge); }
+        .tuile-libelle {
+            font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+            color: var(--texte-doux); font-weight: 600; margin-bottom: 6px;
+        }
+        .tuile-valeur { font-size: 28px; font-weight: 700; color: var(--bte-marine); line-height: 1.1; }
+        .tuile-detail { font-size: 12.5px; color: var(--texte-doux); margin-top: 4px; }
+
+        /* ---------- Tableaux ---------- */
+        .table { margin: 0; font-size: 14px; }
+        .table thead th {
+            background: var(--bte-marine-pale);
+            color: var(--bte-marine);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            border-bottom: 1px solid var(--bordure);
+            padding: 10px 14px;
+        }
+        .table tbody td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--bordure);
+            vertical-align: middle;
+        }
+        .table tbody tr:last-child td { border-bottom: none; }
+        .table tbody tr:hover { background: #FAFBFD; }
+        .cellule-nombre { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+        .table-vide { text-align: center; color: var(--texte-doux); padding: 26px !important; font-style: italic; }
+
+        /* ---------- Formulaires ---------- */
+        .form-label { font-size: 12.5px; font-weight: 600; color: var(--texte-doux); margin-bottom: 5px; }
+        .form-control, .form-select {
+            border: 1px solid var(--bordure);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 14px;
+            color: var(--texte);
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--bte-marine);
+            box-shadow: 0 0 0 3px rgba(27,42,94,.09);
+        }
+
+        .barre-filtres {
+            background: var(--surface);
+            border: 1px solid var(--bordure);
+            border-radius: var(--rayon);
+            padding: 14px 18px;
+            box-shadow: var(--ombre);
+            margin-bottom: 22px;
+        }
+
+        /* ---------- Boutons ---------- */
+        .btn { border-radius: 8px; font-weight: 500; font-size: 13.5px; padding: 7px 15px; }
+        .btn-principal   { background: var(--bte-marine); border: 1px solid var(--bte-marine); color: #fff; }
+        .btn-principal:hover { background: var(--bte-marine-fonce); border-color: var(--bte-marine-fonce); color: #fff; }
+        .btn-secondaire  { background: #fff; border: 1px solid var(--bordure); color: var(--texte); }
+        .btn-secondaire:hover { background: var(--bte-marine-pale); color: var(--bte-marine); }
+        .btn-or          { background: var(--bte-or); border: 1px solid var(--bte-or); color: var(--bte-marine); font-weight: 600; }
+        .btn-or:hover    { background: #E0A800; border-color: #E0A800; color: var(--bte-marine); }
+        .btn-danger-doux { background: var(--bte-rouge-pale); border: 1px solid #F7C5C8; color: var(--bte-rouge); }
+        .btn-danger-doux:hover { background: var(--bte-rouge); color: #fff; border-color: var(--bte-rouge); }
+
+        /* ---------- Divers ---------- */
+        .etiquette {
+            display: inline-block; padding: 3px 9px; border-radius: 20px;
+            font-size: 11.5px; font-weight: 600;
+        }
+        .etiquette-active   { background: #E8F5EC; color: #1F7A3D; }
+        .etiquette-suspendu { background: var(--bte-rouge-pale); color: var(--bte-rouge); }
+
+        .alert { border-radius: var(--rayon); border: 1px solid var(--bordure); font-size: 14px; padding: 11px 16px; }
+        .alert-info    { background: var(--bte-marine-pale); color: var(--bte-marine); border-color: #D4DCEF; }
+        .alert-success { background: #E8F5EC; color: #1F7A3D; border-color: #C6E6D1; }
+        .alert-warning { background: var(--bte-or-pale); color: #8A6A00; border-color: #F5E3B0; }
+        .alert-danger  { background: var(--bte-rouge-pale); color: var(--bte-rouge); border-color: #F7C5C8; }
+
+        @media (max-width: 900px) {
+            .sidebar { position: static; width: 100%; flex-direction: column; }
+            .zone-contenu { margin-left: 0; padding: 18px; }
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="{% if not user.is_authenticated %}sans-sidebar{% endif %}">
+
+{% if user.is_authenticated %}
+<aside class="sidebar">
+    <div class="sidebar-logo">
+        <img src="{% static 'images/bte_logo.jpg' %}" alt="Banque de Tunisie et des Emirats">
+    </div>
+
+    <div class="sidebar-section">Pilotage</div>
+    <a href="{% url 'dashboard' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'dashboard' %}actif{% endif %}">
+        <span class="puce"></span> Tableau de bord
+    </a>
+
+        {% if user.profil.role == 'chef_agence' or user.profil.role == 'employe' %}
+    <div class="sidebar-section">Données</div>
+    <a href="{% url 'liste_kpi' 'compte' %}" class="sidebar-lien"><span class="puce"></span> Comptes clients</a>
+    <a href="{% url 'liste_kpi' 'credit' %}" class="sidebar-lien"><span class="puce"></span> Crédits</a>
+    <a href="{% url 'liste_kpi' 'carte' %}" class="sidebar-lien"><span class="puce"></span> Cartes</a>
+    <a href="{% url 'liste_kpi' 'placement' %}" class="sidebar-lien"><span class="puce"></span> Placements</a>
+    {% endif %}
+
+  {% if user.profil.role == 'super_admin' or user.profil.role == 'chef_agence' %}
+    <div class="sidebar-section">Administration</div>
+    <a href="{% url 'importer_excel' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'importer_excel' %}actif{% endif %}">
+        <span class="puce"></span> Import Excel
+    </a>
+    {% if user.profil.role == 'super_admin' %}
+    <a href="{% url 'exporter_excel' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'exporter_excel' %}actif{% endif %}">
+        <span class="puce"></span> Export Excel
+    </a>
+    <a href="{% url 'analyse_reseau' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'analyse_reseau' %}actif{% endif %}">
+        <span class="puce"></span> Analyse du réseau
+    </a>
+    <a href="{% url 'performance_reseau' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'performance_reseau' %}actif{% endif %}">
+        <span class="puce"></span> Performance
+    </a>
+    {% endif %}
+    <a href="{% url 'gerer_comptes' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'gerer_comptes' %}actif{% endif %}">
+        <span class="puce"></span> Comptes utilisateurs
+    </a>
+    {% if user.profil.role == 'super_admin' %}
+    <a href="/admin/" class="sidebar-lien"><span class="puce"></span> Paramètres</a>
+    {% endif %}
+    {% endif %}
+
+    <div class="sidebar-pied">
+        <div class="sidebar-user">{{ user.username }}</div>
+        <div class="sidebar-role">{{ user.profil.get_role_display }}</div>
+        <form method="post" action="{% url 'logout' %}" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn-deconnexion">Déconnexion</button>
+        </form>
+    </div>
+</aside>
+{% endif %}
+
+<main class="zone-contenu">
+    {% if messages %}
+        {% for m in messages %}
+            <div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>
+        {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

@@ -1,0 +1,245 @@
+{% extends 'base.html' %}
+{% block title %}Performance des agences — KPI BTE{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+    .zone-graphe { position: relative; height: 640px; width: 100%; }
+    .explication {
+        background: var(--bte-marine-pale);
+        border-radius: 9px; padding: 14px 16px;
+        font-size: 13.5px; line-height: 1.6;
+    }
+    .liste-points { margin: 0; padding-left: 20px; }
+    .liste-points li { margin-bottom: 7px; }
+    .liste-points li:last-child { margin-bottom: 0; }
+    .details-methode summary {
+        cursor: pointer; font-size: 13px; color: var(--texte-doux); padding: 10px 0;
+    }
+    .details-methode summary:hover { color: var(--bte-marine); }
+    .bloc-methode {
+        font-size: 12.5px; color: var(--texte-doux); line-height: 1.7;
+        background: #FAFBFD; border-radius: 8px; padding: 14px 16px;
+    }
+    .ecart-positif { color: #1F7A3D; font-weight: 600; }
+    .ecart-negatif { color: var(--bte-rouge); font-weight: 600; }
+    .encart-vert  { border-left: 3px solid #1F7A3D; padding-left: 13px; }
+    .encart-rouge { border-left: 3px solid var(--bte-rouge); padding-left: 13px; }
+    .ligne-agence {
+        display: flex; justify-content: space-between;
+        padding: 7px 0; font-size: 13.5px;
+        border-bottom: 1px solid var(--bordure);
+    }
+    .ligne-agence:last-child { border-bottom: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>Performance des agences</h2>
+        <p class="sous-titre">Réalisé comparé au niveau attendu · Exercice {{ annee }}</p>
+    </div>
+</div>
+
+<form method="get" class="barre-filtres">
+    <div class="row g-3 align-items-end">
+        <div class="col-auto">
+            <label class="form-label">Année</label>
+            <select name="annee" class="form-select form-select-sm">
+                {% for a in annees_dispo %}
+                    <option value="{{ a }}" {% if a == annee %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto" style="min-width:210px;">
+            <label class="form-label">Activité à analyser</label>
+            <select name="cible" class="form-select form-select-sm">
+                {% for code, libelle in cibles %}
+                    <option value="{{ code }}" {% if code == cible %}selected{% endif %}>{{ libelle }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-principal btn-sm">Analyser</button>
+        </div>
+    </div>
+</form>
+
+{% if not performance %}
+    <div class="alert alert-warning">
+        Données insuffisantes pour cette analyse sur l'année {{ annee }}.
+    </div>
+{% else %}
+
+<div class="carte mb-4">
+    <div class="carte-entete">Le principe</div>
+    <div class="carte-corps">
+        <div class="explication mb-3">
+            <ul class="liste-points">
+                <li>À partir de l'activité d'une agence sur les autres produits, on estime le volume de {{ performance.cible_libelle|lower }} qu'elle devrait réaliser.</li>
+                <li>On compare ce niveau attendu à ce qu'elle réalise vraiment.</li>
+                <li>Chaque agence est ainsi comparée à sa propre attente, et non aux autres agences.</li>
+            </ul>
+        </div>
+        <div class="explication">
+            <ul class="liste-points">
+                {% for p in exp_performance %}
+                    <li>{{ p }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="carte h-100">
+            <div class="carte-entete">Font mieux que prévu</div>
+            <div class="carte-corps">
+                <div class="encart-vert">
+                    {% for l in performance.sur_performance %}
+                    <div class="ligne-agence">
+                        <span>{{ l.agence }}</span>
+                        <span class="ecart-positif">+{{ l.ecart_pct }} %</span>
+                    </div>
+                    {% empty %}
+                    <div style="color:var(--texte-doux); font-style:italic; padding:10px 0;">
+                        Aucune agence ne dépasse nettement son niveau attendu.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="carte h-100">
+            <div class="carte-entete">Font moins bien que prévu</div>
+            <div class="carte-corps">
+                <div class="encart-rouge">
+                    {% for l in performance.sous_performance %}
+                    <div class="ligne-agence">
+                        <span>{{ l.agence }}</span>
+                        <span class="ecart-negatif">{{ l.ecart_pct }} %</span>
+                    </div>
+                    {% empty %}
+                    <div style="color:var(--texte-doux); font-style:italic; padding:10px 0;">
+                        Aucune agence ne reste nettement sous son niveau attendu.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="carte mb-4">
+    <div class="carte-entete">Écart au niveau attendu, agence par agence</div>
+    <div class="carte-corps">
+        <div class="zone-graphe">
+            <canvas id="grapheEcarts"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="carte">
+    <div class="carte-entete">Détail par agence</div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Agence</th>
+                <th class="text-end">Réalisé</th>
+                <th class="text-end">Attendu</th>
+                <th class="text-end">Écart</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for l in performance.lignes %}
+            <tr>
+                <td>{{ l.agence }}</td>
+                <td class="cellule-nombre">{{ l.realise }}</td>
+                <td class="cellule-nombre">{{ l.attendu }}</td>
+                <td class="cellule-nombre {% if l.ecart_pct > 0 %}ecart-positif{% else %}ecart-negatif{% endif %}">
+                    {% if l.ecart_pct > 0 %}+{% endif %}{{ l.ecart_pct }} %
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="carte-corps" style="border-top:1px solid var(--bordure);">
+        <details class="details-methode">
+            <summary>Détails techniques</summary>
+            <div class="bloc-methode">
+                               Trois modèles comparés en validation leave-one-out sur
+                {{ performance.n_agences }} agences, sur variables log-transformées.
+                Modèle retenu : {{ performance.modele_retenu }} (R² = {{ performance.r2 }}).
+                <div class="mt-2">
+                    {% for m in performance.comparaison %}
+                        {{ m.nom }} — R² {{ m.r2 }}, MAE {{ m.mae }}<br>
+                    {% endfor %}
+                </div>
+                <div class="mt-2">
+                    Variables explicatives :
+                    {% for f in performance.facteurs %}{{ f.nom }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                </div>
+            </div>
+        </details>
+    </div>
+</div>
+
+{{ performance.lignes|json_script:"donnees-ecarts" }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var element = document.getElementById('donnees-ecarts');
+    var canvas = document.getElementById('grapheEcarts');
+    if (!element || !canvas) { return; }
+
+    var lignes = JSON.parse(element.textContent);
+    if (!lignes.length) { return; }
+
+    Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.color = '#78819A';
+
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: lignes.map(function (l) { return l.agence; }),
+            datasets: [{
+                data: lignes.map(function (l) { return l.ecart_pct; }),
+                backgroundColor: lignes.map(function (l) {
+                    return l.ecart_pct >= 0 ? '#3E8E7E' : '#E30613';
+                }),
+                borderRadius: 3
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function (ctx) {
+                            var v = ctx.raw;
+                            return (v >= 0 ? '+' : '') + v + " % par rapport à l'attendu";
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: '#E4EAF6' },
+                    title: { display: true, text: "Écart au niveau attendu (%)" }
+                },
+                y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+            }
+        }
+    });
+});
+</script>
+
+{% endif %}
+{% endblock %}

@@ -1,0 +1,216 @@
+{% extends 'base.html' %}
+{% block title %}Import Excel — KPI BTE{% endblock %}
+
+{% block extra_head %}
+<style>
+    .etape {
+        display: flex;
+        gap: 12px;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--bordure);
+    }
+    .etape:last-child { border-bottom: none; }
+    .etape-numero {
+        flex: none;
+        width: 24px; height: 24px;
+        border-radius: 50%;
+        background: var(--bte-marine-pale);
+        color: var(--bte-marine);
+        font-size: 12px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .etape-texte { font-size: 13.5px; line-height: 1.5; }
+    .etape-texte strong { color: var(--bte-marine); display: block; margin-bottom: 1px; }
+    .ligne-type {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 8px 0; border-bottom: 1px solid var(--bordure); font-size: 13.5px;
+    }
+    .ligne-type:last-child { border-bottom: none; }
+    .puce-fichier {
+        font-family: ui-monospace, monospace; font-size: 11.5px;
+        background: var(--bte-marine-pale); color: var(--bte-marine);
+        padding: 2px 8px; border-radius: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>Import de données Excel</h2>
+        <p class="sous-titre">
+            {% if profil.est_super_admin %}
+                Alimentation du réseau — toutes agences
+            {% else %}
+                {{ profil.agence }}
+            {% endif %}
+        </p>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-secondaire">Retour au tableau de bord</a>
+</div>
+
+<div class="row g-3">
+    <!-- Colonne gauche : formulaire -->
+    <div class="col-lg-5">
+        <div class="carte mb-3">
+            <div class="carte-entete">Nouveau fichier</div>
+            <div class="carte-corps">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label">Type de données</label>
+                        <select name="type_fichier" class="form-select" required>
+                            <option value="">-- Choisir --</option>
+                            {% for valeur, libelle in types_fichier %}
+                                <option value="{{ valeur }}" {% if type_choisi == valeur %}selected{% endif %}>
+                                    {{ libelle }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Année des données</label>
+                        <select name="annee" class="form-select" required>
+                            {% for a in annees_dispo %}
+                                <option value="{{ a }}" {% if a == annee_choisie %}selected{% endif %}>{{ a }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Fichier Excel (.xls ou .xlsx)</label>
+                        <input type="file" name="fichier" class="form-control" accept=".xls,.xlsx" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-principal w-100">Lancer l'import</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="carte">
+            <div class="carte-entete">Fichiers attendus</div>
+            <div class="carte-corps" style="padding-top:6px; padding-bottom:6px;">
+                <div class="ligne-type"><span>Comptes clients</span><span class="puce-fichier">COMPTES_CLIENTS</span></div>
+                <div class="ligne-type"><span>Cartes</span><span class="puce-fichier">CARTES_EN</span></div>
+                <div class="ligne-type"><span>Crédits particuliers</span><span class="puce-fichier">CREDITS_AUX_PP</span></div>
+                <div class="ligne-type"><span>Crédits de gestion</span><span class="puce-fichier">CREDITS_DE_GESTION</span></div>
+                <div class="ligne-type"><span>Crédit morale non terme</span><span class="puce-fichier">CMLT</span></div>
+                <div class="ligne-type"><span>Placements</span><span class="puce-fichier">PLACEMENTS</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Colonne droite : rapport ou guide -->
+    <div class="col-lg-7">
+        {% if rapport %}
+        <div class="carte mb-3">
+            <div class="carte-entete">Rapport d'import</div>
+            <div class="carte-corps">
+                <div class="row g-2 mb-3">
+                    <div class="col-4">
+                        <div class="tuile" style="padding:14px 16px;">
+                            <div class="tuile-libelle">Lignes importées</div>
+                            <div class="tuile-valeur" style="font-size:24px;">{{ rapport.importes }}</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="tuile accent-or" style="padding:14px 16px;">
+                            <div class="tuile-libelle">Agences traitées</div>
+                            <div class="tuile-valeur" style="font-size:24px;">{{ rapport.agences_ok|length }}</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="tuile accent-rouge" style="padding:14px 16px;">
+                            <div class="tuile-libelle">Ignorées</div>
+                            <div class="tuile-valeur" style="font-size:24px;">{{ rapport.agences_ignorees|length }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                {% if rapport.lignes_hors_agence %}
+                <p class="mb-2" style="font-size:13px; color:var(--texte-doux);">
+                    {{ rapport.lignes_hors_agence }} ligne(s) écartée(s) car hors de votre agence.
+                </p>
+                {% endif %}
+
+                {% if rapport.agences_ignorees %}
+                <div class="alert alert-warning py-2">
+                    <strong style="font-size:13px;">Données déjà présentes pour cette année :</strong>
+                    <div style="font-size:12.5px; margin-top:4px;">
+                        {% for a in rapport.agences_ignorees %}{{ a }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if rapport.erreurs %}
+                <div class="alert alert-danger py-2">
+                    <strong style="font-size:13px;">Erreurs rencontrées :</strong>
+                    <ul class="mb-0" style="font-size:12.5px; margin-top:4px; padding-left:18px;">
+                        {% for e in rapport.erreurs %}<li>{{ e }}</li>{% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if rapport.agences_ok %}
+                <details style="font-size:13px;">
+                    <summary style="color:var(--texte-doux); cursor:pointer;">
+                        Voir les {{ rapport.agences_ok|length }} agence(s) alimentée(s)
+                    </summary>
+                    <div style="margin-top:8px; font-size:12.5px; color:var(--texte-doux); line-height:1.7;">
+                        {% for a in rapport.agences_ok %}{{ a }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    </div>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="carte mb-3">
+            <div class="carte-entete">Déroulement de l'import</div>
+            <div class="carte-corps" style="padding-top:6px; padding-bottom:10px;">
+                <div class="etape">
+                    <div class="etape-numero">1</div>
+                    <div class="etape-texte">
+                        <strong>Choix du type</strong>
+                        Le format des colonnes diffère selon la nature des données. Le type sélectionné doit correspondre au fichier envoyé.
+                    </div>
+                </div>
+                <div class="etape">
+                    <div class="etape-numero">2</div>
+                    <div class="etape-texte">
+                        <strong>Choix de l'année</strong>
+                        L'année n'est jamais déduite du nom du fichier : elle est sélectionnée manuellement pour éviter toute erreur d'affectation.
+                    </div>
+                </div>
+                <div class="etape">
+                    <div class="etape-numero">3</div>
+                    <div class="etape-texte">
+                        <strong>Répartition par agence</strong>
+                        {% if profil.est_super_admin %}
+                            Chaque ligne est dirigée vers son agence d'origine grâce au code figurant dans la colonne COD_UG.
+                        {% else %}
+                            Seules les lignes portant le code de votre agence ({{ profil.agence.code_agence }}) sont retenues ; les autres sont écartées.
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="etape">
+                    <div class="etape-numero">4</div>
+                    <div class="etape-texte">
+                        <strong>Contrôle des doublons</strong>
+                        Une agence disposant déjà de données pour l'année choisie est ignorée. Les autres agences du fichier sont importées normalement.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info">
+            <strong style="font-size:13px;">Bon à savoir</strong>
+            <div style="font-size:13px; margin-top:3px;">
+                Pour remplacer des données existantes, supprimez-les d'abord depuis les pages de consultation, puis relancez l'import.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

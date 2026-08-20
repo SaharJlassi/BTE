@@ -1,0 +1,31 @@
+# Environnement virtuel
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+/media/
+/staticfiles/
+
+# Fichiers de données BTE (confidentiels)
+*.xls
+*.xlsx
+fichier/
+historique/
+
+# Environnement
+.env
+
+# VS Code
+.vscode/
+
+# Windows / macOS
+Thumbs.db
+.DS_Store
