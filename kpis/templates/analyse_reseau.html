@@ -1,11 +1,12 @@
 {% extends 'base.html' %}
 {% load kpi_filtres %}
 {% block title %}Analyse du réseau — KPI BTE{% endblock %}
+
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
     .zone-nuage { position: relative; height: 420px; }
-    .zone-barres { position: relative; height: 320px; }
+    .zone-barres { position: relative; height: 340px; }
 
     .explication {
         background: var(--bte-marine-pale);
@@ -36,6 +37,9 @@
     .carte-groupe-titre { font-weight: 600; color: var(--bte-marine); font-size: 14.5px; }
     .carte-groupe-effectif { font-size: 12.5px; color: var(--texte-doux); margin-bottom: 8px; }
     .carte-groupe-texte { font-size: 13px; line-height: 1.6; }
+
+    .trait { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+    .trait-valeur { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--bte-marine); }
 
     .details-methode summary {
         cursor: pointer; font-size: 13px; color: var(--texte-doux);
@@ -77,14 +81,6 @@
             </select>
         </div>
         <div class="col-auto">
-            <label class="form-label">Nombre de profils types</label>
-            <select name="profils" class="form-select form-select-sm">
-                {% for p in "23456"|make_list %}
-                    <option value="{{ p }}" {% if p|add:0 == n_profils %}selected{% endif %}>{{ p }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-auto">
             <button type="submit" class="btn btn-principal btn-sm">Lancer l'analyse</button>
         </div>
     </div>
@@ -118,7 +114,7 @@
             <div class="col-lg-7">
                 <div class="zone-nuage"><canvas id="nuage"></canvas></div>
             </div>
-           <div class="col-lg-5 d-flex align-items-center">
+            <div class="col-lg-5 d-flex align-items-center">
                 <div style="width:100%;">
                     <div class="explication-titre">Comment lire cette carte</div>
                     <div class="explication">
@@ -132,27 +128,33 @@
             </div>
         </div>
 
-        <details class="details-methode mt-2">
+               <details class="details-methode mt-3">
             <summary>Détails techniques</summary>
             <div class="bloc-methode">
-                Projection par analyse en composantes principales sur profils standardisés,
-                puis segmentation K-Means. Nombre de groupes choisi par maximisation du score
-                de silhouette.
-                <div class="mt-2">
-                    <div class="indicateur"><span>Agences analysées</span><span class="indicateur-valeur">{{ resultat.n_agences }}</span></div>
-                    <div class="indicateur"><span>Variables</span><span class="indicateur-valeur">{{ resultat.n_variables }}</span></div>
-                    <div class="indicateur"><span>Variance expliquée (2 axes)</span><span class="indicateur-valeur">{{ resultat.variance_totale }}%</span></div>
-                    <div class="indicateur"><span>Score de silhouette (k={{ resultat.k }})</span><span class="indicateur-valeur">{{ resultat.silhouette }}</span></div>
-                </div>
+                Allocation de Dirichlet latente sur les comptages bruts.
+                Nombre de composantes choisi par minimisation de la perplexité
+                en validation croisée à {{ resultat.lda.n_plis }} plis :
+                {{ resultat.lda.k }} profils retenus, perplexité
+                {{ resultat.lda.perplexite }}.
                 <div class="mt-2">
                     Balayage :
-                    {% for b in resultat.balayage %}k={{ b.k }} → {{ b.silhouette }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    {% for b in resultat.lda.balayage %}k={{ b.k }} → {{ b.perplexite }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    <br>
+                    Écart relatif entre les valeurs extrêmes : {{ resultat.lda.etendue }} %.
+                    {% if resultat.lda.choix_net %}
+                        Le minimum est suffisamment marqué pour trancher.
+                    {% else %}
+                        Le balayage est plat : plusieurs valeurs de k conviennent
+                        presque aussi bien, la plus parcimonieuse a été retenue.
+                    {% endif %}
                 </div>
                 <div class="mt-2">
-                    {% for axe in resultat.axes %}
-                    Axe {{ axe.numero }} ({{ axe.variance }}%) :
-                    {% for v in axe.variables %}{{ v.nom }} ({{ v.poids }}){% if not forloop.last %}, {% endif %}{% endfor %}<br>
-                    {% endfor %}
+                    Une factorisation NMF est calculée en parallèle sur les parts
+                    d'activité (erreur de reconstruction {{ resultat.latents.erreur }}).
+                    Contrairement à elle, la LDA définit une vraisemblance, ce qui
+                    permet de choisir le nombre de profils par validation plutôt
+                    que de le fixer a priori ; elle travaille en outre sur les
+                    comptages, pondérant chaque agence par son volume.
                 </div>
             </div>
         </details>
@@ -198,19 +200,37 @@
 
 <!-- Agences qui sortent du lot -->
 <div class="carte mb-4">
-    <div class="carte-entete">Agences qui sortent du lot</div>
+    <div class="carte-entete">Agences au profil atypique</div>
+    <div class="carte-corps">
+        <div class="explication mb-3">
+            <ul class="liste-points">
+                {% for p in resultat.exp_anomalies %}
+                    <li>{{ p }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
     <table class="table">
         <thead>
-            <tr><th style="width:30%;">Agence</th><th>Ce qui la distingue</th></tr>
+            <tr>
+                <th style="width:30%;">Agence</th>
+                <th>Ce qui la distingue</th>
+                <th class="text-end" style="width:110px;">Certitude</th>
+            </tr>
         </thead>
         <tbody>
         {% for a in resultat.explications.lignes_anomalies %}
             <tr>
                 <td><strong>{{ a.agence }}</strong></td>
                 <td>{{ a.phrase }}</td>
+                <td class="cellule-nombre">{{ a.p_ajustee }}</td>
             </tr>
         {% empty %}
-            <tr><td colspan="2" class="table-vide">Aucune agence ne se démarque particulièrement</td></tr>
+            <tr>
+                <td colspan="3" class="table-vide">
+                    Aucune agence ne se démarque de façon statistiquement établie
+                </td>
+            </tr>
         {% endfor %}
         </tbody>
     </table>
@@ -218,43 +238,87 @@
         <details class="details-methode">
             <summary>Détails techniques</summary>
             <div class="bloc-methode">
-                Isolation Forest, 300 arbres, contamination 12 %.
-                {% for a in resultat.anomalies %}
-                <div class="mt-1">
-                    {{ a.agence }} — {{ a.variable }} : {% if a.ecart > 0 %}+{% endif %}{{ a.ecart }}σ,
-                    score {{ a.score }}
+                Isolation Forest sans hypothèse de contamination. Distribution de
+                référence obtenue par {{ resultat.test_anomalies.n_permutations }}
+                permutations colonne par colonne, préservant les distributions
+                marginales tout en détruisant les profils.
+                <div class="mt-2">
+                    p-valeurs empiriques corrigées par la procédure de
+                    Benjamini-Hochberg, taux de fausses découvertes contrôlé à
+                    {{ resultat.test_anomalies.alpha }}.
+                    p-valeur minimale observée : {{ resultat.test_anomalies.p_min }}.
+                    Sans correction, {{ resultat.test_anomalies.seuil_naif }} agences
+                    auraient été signalées contre {{ resultat.test_anomalies.n_signalees }}
+                    après ajustement.
                 </div>
-                {% endfor %}
+                <div class="mt-2">
+                    Détail par agence :
+                    {% for l in resultat.test_anomalies.lignes %}
+                        {{ l.agence }} (p = {{ l.p_ajustee }}){% if not forloop.last %} · {% endif %}
+                    {% endfor %}
+                </div>
             </div>
         </details>
     </div>
 </div>
 
-<!-- Profils types -->
+<!-- Profils types (LDA) -->
+{% if resultat.lda %}
 <div class="carte mb-4">
-    <div class="carte-entete">Les profils types d'activité</div>
+    <div class="carte-entete">Les façons types de travailler</div>
     <div class="carte-corps">
-<div class="explication mb-3">
+        <div class="explication mb-3">
             <ul class="liste-points">
-                {% for p in resultat.explications.points_melanges %}
+                {% for p in resultat.exp_lda %}
                     <li>{{ p }}</li>
                 {% endfor %}
             </ul>
         </div>
+
         <div class="row g-3 mb-3">
-            {% for p in resultat.explications.profils %}
+            {% for p in resultat.lda.profils %}
             <div class="col-lg-4 col-md-6">
                 <div class="carte-groupe">
                     <div class="carte-groupe-titre">
-                        <span class="pastille" data-groupe="{{ p.numero }}"></span>{{ p.titre }}
+                        <span class="pastille" data-groupe="{{ p.numero }}"></span>Profil {{ p.numero }}
                     </div>
-                    <div class="carte-groupe-texte mt-2">{{ p.description }}</div>
+                    <div class="carte-groupe-effectif">
+                        {{ p.part_reseau }} % de l'activité du réseau
+                    </div>
+                    {% for produit in p.produits %}
+                    <div class="trait">
+                        <span>{{ produit.nom }}</span>
+                        <span class="trait-valeur">{{ produit.poids }} %</span>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endfor %}
         </div>
 
-        <div class="zone-barres"><canvas id="archetypes"></canvas></div>
+        <div class="zone-barres"><canvas id="profils"></canvas></div>
+
+        <details class="details-methode mt-3">
+            <summary>Détails techniques</summary>
+            <div class="bloc-methode">
+                Allocation de Dirichlet latente sur les comptages bruts.
+                Nombre de composantes choisi par minimisation de la perplexité
+                en validation croisée à cinq plis : {{ resultat.lda.k }} profils
+                retenus, perplexité {{ resultat.lda.perplexite }}.
+                <div class="mt-2">
+                    Balayage :
+                    {% for b in resultat.lda.balayage %}k={{ b.k }} → {{ b.perplexite }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                </div>
+                <div class="mt-2">
+                    Une factorisation NMF est calculée en parallèle sur les parts
+                    d'activité (erreur de reconstruction {{ resultat.latents.erreur }}).
+                    Contrairement à elle, la LDA définit une vraisemblance, ce qui
+                    permet de choisir le nombre de profils par validation plutôt
+                    que de le fixer a priori ; elle travaille en outre sur les
+                    comptages, pondérant chaque agence par son volume.
+                </div>
+            </div>
+        </details>
     </div>
 </div>
 
@@ -264,24 +328,27 @@
     <table class="table">
         <thead>
             <tr>
-                <th style="width:30%;">Agence</th>
+                <th style="width:26%;">Agence</th>
                 <th>Composition de son activité</th>
                 <th class="text-end" style="width:16%;">Profil principal</th>
+                <th class="text-end" style="width:12%;">Part</th>
             </tr>
         </thead>
         <tbody>
-        {% for a in resultat.latents.appartenances %}
+        {% for a in resultat.lda.appartenances %}
             <tr>
                 <td style="font-size:13.5px;">{{ a.agence }}</td>
                 <td><div class="barre-empilee" data-parts="{{ a.parts|join:',' }}"></div></td>
                 <td class="text-end">
                     <span class="pastille" data-groupe="{{ a.dominant }}"></span>Profil {{ a.dominant }}
                 </td>
+                <td class="cellule-nombre">{{ a.part_dominante }} %</td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
 </div>
+{% endif %}
 
 {{ resultat|json_script:"donnees-analyse" }}
 <script>
@@ -308,7 +375,7 @@
         });
     });
 
-    // Nuage de points
+    // --- Nuage de points ---
     const groupes = {};
     donnees.points.forEach(function (p) {
         if (!groupes[p.groupe]) groupes[p.groupe] = [];
@@ -356,42 +423,45 @@
         }
     });
 
-    // Profils types
-    const profils = donnees.latents.profils;
-    const produits = [];
-    profils.forEach(function (p) {
-        p.produits.forEach(function (pr) {
-            if (produits.indexOf(pr.nom) === -1) produits.push(pr.nom);
+    // --- Composition des profils (LDA) ---
+    const canvasProfils = document.getElementById('profils');
+    if (canvasProfils && donnees.lda) {
+        const profils = donnees.lda.profils;
+        const produits = [];
+        profils.forEach(function (p) {
+            p.produits.forEach(function (pr) {
+                if (produits.indexOf(pr.nom) === -1) produits.push(pr.nom);
+            });
         });
-    });
 
-    new Chart(document.getElementById('archetypes'), {
-        type: 'bar',
-        data: {
-            labels: produits,
-            datasets: profils.map(function (p, i) {
-                return {
-                    label: 'Profil ' + p.numero,
-                    data: produits.map(function (nom) {
-                        const t = p.produits.find(function (pr) { return pr.nom === nom; });
-                        return t ? t.poids : 0;
-                    }),
-                    backgroundColor: PALETTE[i % PALETTE.length],
-                    borderRadius: 4
-                };
-            })
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10 } } },
-            scales: {
-                x: { grid: { color: '#E4EAF6' }, title: { display: true, text: 'Importance dans le profil (%)' } },
-                y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        new Chart(canvasProfils, {
+            type: 'bar',
+            data: {
+                labels: produits,
+                datasets: profils.map(function (p, i) {
+                    return {
+                        label: 'Profil ' + p.numero,
+                        data: produits.map(function (nom) {
+                            const t = p.produits.find(function (pr) { return pr.nom === nom; });
+                            return t ? t.poids : 0;
+                        }),
+                        backgroundColor: PALETTE[i % PALETTE.length],
+                        borderRadius: 4
+                    };
+                })
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 10 } } },
+                scales: {
+                    x: { grid: { color: '#E4EAF6' }, title: { display: true, text: 'Importance dans le profil (%)' } },
+                    y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                }
             }
-        }
-    });
+        });
+    }
 })();
 </script>
 {% endif %}

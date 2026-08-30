@@ -299,6 +299,9 @@
     <a href="{% url 'performance_reseau' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'performance_reseau' %}actif{% endif %}">
         <span class="puce"></span> Performance
     </a>
+        <a href="{% url 'communautes_reseau' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'communautes_reseau' %}actif{% endif %}">
+        <span class="puce"></span> Communautés
+    </a>
     {% endif %}
     <a href="{% url 'gerer_comptes' %}" class="sidebar-lien {% if request.resolver_match.url_name == 'gerer_comptes' %}actif{% endif %}">
         <span class="puce"></span> Comptes utilisateurs

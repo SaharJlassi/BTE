@@ -20,4 +20,5 @@ urlpatterns = [
     path('kpi/<str:type_kpi>/supprimer/<int:pk>/', views.supprimer_kpi, name='supprimer_kpi'),
     path('analyse/', views.analyse_reseau, name='analyse_reseau'),
     path('performance/', views.performance_reseau, name='performance_reseau'),
+    path('communautes/', views.communautes_reseau, name='communautes_reseau'),
 ]

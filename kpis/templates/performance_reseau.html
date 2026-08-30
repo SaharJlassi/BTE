@@ -4,6 +4,20 @@
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
+    .badge-verdict {
+        display: inline-block; padding: 3px 9px; border-radius: 20px;
+        font-size: 11.5px; font-weight: 600;
+    }
+    .badge-au-dessus { background: #E8F5EC; color: #1F7A3D; }
+    .badge-en-dessous { background: var(--bte-rouge-pale); color: var(--bte-rouge); }
+    .badge-conforme { background: var(--bte-marine-pale); color: var(--texte-doux); }
+    .intervalle { font-size: 12px; color: var(--texte-doux); font-variant-numeric: tabular-nums; }
+    .barre-proba {
+        height: 6px; border-radius: 3px; background: var(--bordure);
+        overflow: hidden; min-width: 60px;
+    }
+    .barre-proba span { display: block; height: 100%; }
+
     .zone-graphe { position: relative; height: 640px; width: 100%; }
     .explication {
         background: var(--bte-marine-pale);
@@ -31,6 +45,25 @@
         border-bottom: 1px solid var(--bordure);
     }
     .ligne-agence:last-child { border-bottom: none; }
+
+    .ligne-priorite {
+        display: flex; align-items: center; gap: 12px;
+        padding: 11px 0; border-bottom: 1px solid var(--bordure);
+    }
+    .ligne-priorite:last-child { border-bottom: none; }
+    .rang-cercle {
+        flex: none; width: 28px; height: 28px; border-radius: 50%;
+        background: var(--bte-marine); color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px; font-weight: 700;
+    }
+    .priorite-nom { flex: 1; font-size: 13.5px; font-weight: 500; }
+    .priorite-detail { font-size: 12.5px; color: var(--texte-doux); }
+    .etiquette-cout {
+        display: inline-block; padding: 2px 8px; border-radius: 20px;
+        font-size: 11px; font-weight: 600; background: var(--bte-marine-pale);
+        color: var(--bte-marine);
+    }
 </style>
 {% endblock %}
 
@@ -60,6 +93,11 @@
                 {% endfor %}
             </select>
         </div>
+        <div class="col-auto" style="width:130px;">
+            <label class="form-label">Budget d'action</label>
+            <input type="number" name="budget" class="form-control form-control-sm"
+                   min="1" max="30" step="1" value="{{ budget }}">
+        </div>
         <div class="col-auto">
             <button type="submit" class="btn btn-principal btn-sm">Analyser</button>
         </div>
@@ -70,21 +108,95 @@
     <div class="alert alert-warning">
         Données insuffisantes pour cette analyse sur l'année {{ annee }}.
     </div>
+
+{% elif performance.insuffisant %}
+    <div class="carte">
+        <div class="carte-entete">Analyse non conduite — {{ performance.cible_libelle }}</div>
+        <div class="carte-corps">
+            <div class="explication">
+                <ul class="liste-points">
+                    {% for p in exp_performance %}
+                        <li>{{ p }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <details class="details-methode mt-2">
+                <summary>Détails techniques</summary>
+                <div class="bloc-methode">
+                    Volume médian par agence : {{ performance.volume_median }},
+                    en dessous du seuil de {{ performance.seuil }} retenu pour
+                    conduire l'analyse. Sur des comptages de cet ordre, la variance
+                    d'échantillonnage domine la variance inter-agences.
+                </div>
+            </details>
+        </div>
+    </div>
+
 {% else %}
 
+{% if performance.conforme %}
 <div class="carte mb-4">
-    <div class="carte-entete">Le principe</div>
+    <div class="carte-entete">Marge d'erreur du modèle</div>
     <div class="carte-corps">
         <div class="explication mb-3">
             <ul class="liste-points">
-                <li>À partir de l'activité d'une agence sur les autres produits, on estime le volume de {{ performance.cible_libelle|lower }} qu'elle devrait réaliser.</li>
-                <li>On compare ce niveau attendu à ce qu'elle réalise vraiment.</li>
-                <li>Chaque agence est ainsi comparée à sa propre attente, et non aux autres agences.</li>
+                {% for p in exp_conforme %}
+                    <li>{{ p }}</li>
+                {% endfor %}
             </ul>
         </div>
+
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="tuile">
+                    <div class="tuile-libelle">Dans la fourchette</div>
+                    <div class="tuile-valeur">{{ performance.conforme.n_conforme }}</div>
+                    <div class="tuile-detail">résultat conforme à l'attendu</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tuile accent-or">
+                    <div class="tuile-libelle">Au-dessus</div>
+                    <div class="tuile-valeur">{{ performance.conforme.n_au_dessus }}</div>
+                    <div class="tuile-detail">dépassent leur fourchette</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tuile accent-rouge">
+                    <div class="tuile-libelle">En dessous</div>
+                    <div class="tuile-valeur">{{ performance.conforme.n_en_dessous }}</div>
+                    <div class="tuile-detail">sous leur fourchette</div>
+                </div>
+            </div>
+        </div>
+
+        <details class="details-methode mt-2">
+            <summary>Détails techniques</summary>
+            <div class="bloc-methode">
+                Inférence conforme, variante jackknife+ : les résidus de la validation
+                leave-one-out servent de scores de non-conformité. Quantile pris au
+                niveau ceil((n+1)(1−α))/n, ce qui assure une couverture garantie en
+                échantillon fini sans hypothèse distributionnelle.
+                <div class="mt-2">
+                    Niveau visé : {{ performance.conforme.niveau }} %.
+                    Couverture empirique observée : {{ performance.conforme.couverture }} %.
+                    Demi-largeur en échelle logarithmique :
+                    {{ performance.conforme.demi_largeur }}, soit un intervalle
+                    multiplicatif de −{{ performance.conforme.baisse_pct }} % à
+                    +{{ performance.conforme.hausse_pct }} % autour du niveau attendu.
+                </div>
+            </div>
+        </details>
+    </div>
+</div>
+{% endif %}
+
+<div class="carte mb-4">
+    <div class="carte-entete">Correction appliquée aux écarts</div>
+    <div class="carte-corps">
         <div class="explication">
             <ul class="liste-points">
-                {% for p in exp_performance %}
+                {% for p in exp_bayesien %}
                     <li>{{ p }}</li>
                 {% endfor %}
             </ul>
@@ -92,20 +204,100 @@
     </div>
 </div>
 
+{% if allocation %}
+<div class="carte mb-4">
+    <div class="carte-entete">Où concentrer l'effort commercial</div>
+    <div class="carte-corps">
+        <div class="explication mb-3">
+            <ul class="liste-points">
+                {% for p in exp_allocation %}
+                    <li>{{ p }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        {% if not allocation.aucun_candidat %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="tuile">
+                    <div class="tuile-libelle">Agences à cibler</div>
+                    <div class="tuile-valeur">{{ allocation.n_retenus }}</div>
+                    <div class="tuile-detail">sur {{ allocation.n_candidats }} en retard</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tuile accent-or">
+                    <div class="tuile-libelle">Gain estimé</div>
+                    <div class="tuile-valeur">{{ allocation.gain_total }}</div>
+                    <div class="tuile-detail">dossiers récupérables</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="tuile">
+                    <div class="tuile-libelle">Budget engagé</div>
+                    <div class="tuile-valeur">{{ allocation.cout_engage }}</div>
+                    <div class="tuile-detail">sur {{ allocation.budget }} disponibles</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="border:1px solid var(--bordure); border-radius:9px; padding:6px 16px;">
+            {% for c in allocation.retenus %}
+            <div class="ligne-priorite">
+                <div class="rang-cercle">{{ forloop.counter }}</div>
+                <div class="priorite-nom">
+                    {{ c.agence }}
+                    <div class="priorite-detail">
+                        {{ c.realise }} réalisés pour {{ c.attendu }} attendus ·
+                        {{ c.manque }} dossiers d'écart
+                    </div>
+                </div>
+                <div class="text-end">
+                    <div style="font-weight:700; color:#1F7A3D;">+{{ c.gain }}</div>
+                    <span class="etiquette-cout">action {{ c.intensite }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <details class="details-methode mt-2">
+            <summary>Détails techniques</summary>
+            <div class="bloc-methode">
+                Problème de sac à dos résolu exactement par programmation dynamique
+                sur {{ allocation.n_candidats }} agences candidates.
+                Gain escompté = écart en dossiers × taux de redressement
+                ({{ allocation.taux_redressement }}) × fiabilité de l'écart.
+                Coût de 1 à 3 unités selon le volume de l'agence.
+                <div class="mt-2">
+                    Comparaison à une sélection par plus fortes baisses :
+                    {{ allocation.gain_naif }} dossiers pour {{ allocation.n_naif }} agences,
+                    contre {{ allocation.gain_total }} pour {{ allocation.n_retenus }} agences
+                    avec l'optimisation, soit {{ allocation.progression }} % de mieux.
+                </div>
+            </div>
+        </details>
+    </div>
+</div>
+{% endif %}
+
 <div class="row g-3 mb-4">
     <div class="col-lg-6">
         <div class="carte h-100">
-            <div class="carte-entete">Font mieux que prévu</div>
+            <div class="carte-entete">Au-dessus du niveau attendu</div>
             <div class="carte-corps">
                 <div class="encart-vert">
-                    {% for l in performance.sur_performance %}
+                    {% for l in performance.au_dessus %}
                     <div class="ligne-agence">
                         <span>{{ l.agence }}</span>
-                        <span class="ecart-positif">+{{ l.ecart_pct }} %</span>
+                        <span>
+                            <span class="ecart-positif">+{{ l.ecart_ajuste }} %</span>
+                            <span class="intervalle">({{ l.realise }} pour {{ l.attendu_min }}–{{ l.attendu_max }})</span>
+                        </span>
                     </div>
                     {% empty %}
                     <div style="color:var(--texte-doux); font-style:italic; padding:10px 0;">
-                        Aucune agence ne dépasse nettement son niveau attendu.
+                        Aucune agence ne dépasse sa fourchette.
                     </div>
                     {% endfor %}
                 </div>
@@ -115,17 +307,20 @@
 
     <div class="col-lg-6">
         <div class="carte h-100">
-            <div class="carte-entete">Font moins bien que prévu</div>
+            <div class="carte-entete">En dessous du niveau attendu</div>
             <div class="carte-corps">
                 <div class="encart-rouge">
-                    {% for l in performance.sous_performance %}
+                    {% for l in performance.en_dessous %}
                     <div class="ligne-agence">
                         <span>{{ l.agence }}</span>
-                        <span class="ecart-negatif">{{ l.ecart_pct }} %</span>
+                        <span>
+                            <span class="ecart-negatif">{{ l.ecart_ajuste }} %</span>
+                            <span class="intervalle">({{ l.realise }} pour {{ l.attendu_min }}–{{ l.attendu_max }})</span>
+                        </span>
                     </div>
                     {% empty %}
                     <div style="color:var(--texte-doux); font-style:italic; padding:10px 0;">
-                        Aucune agence ne reste nettement sous son niveau attendu.
+                        Aucune agence ne tombe sous sa fourchette.
                     </div>
                     {% endfor %}
                 </div>
@@ -151,7 +346,10 @@
                 <th>Agence</th>
                 <th class="text-end">Réalisé</th>
                 <th class="text-end">Attendu</th>
-                <th class="text-end">Écart</th>
+                <th class="text-end">Fourchette attendue</th>
+                <th class="text-end">Écart corrigé</th>
+                <th style="width:110px;">Certitude</th>
+                <th class="text-end">Situation</th>
             </tr>
         </thead>
         <tbody>
@@ -160,8 +358,23 @@
                 <td>{{ l.agence }}</td>
                 <td class="cellule-nombre">{{ l.realise }}</td>
                 <td class="cellule-nombre">{{ l.attendu }}</td>
-                <td class="cellule-nombre {% if l.ecart_pct > 0 %}ecart-positif{% else %}ecart-negatif{% endif %}">
-                    {% if l.ecart_pct > 0 %}+{% endif %}{{ l.ecart_pct }} %
+                <td class="text-end intervalle">{{ l.attendu_min }} – {{ l.attendu_max }}</td>
+                <td class="cellule-nombre {% if l.ecart_ajuste > 0 %}ecart-positif{% elif l.ecart_ajuste < 0 %}ecart-negatif{% endif %}">
+                    {% if l.ecart_ajuste > 0 %}+{% endif %}{{ l.ecart_ajuste }} %
+                </td>
+                <td>
+                    <div class="barre-proba">
+                        <span style="width:{{ l.probabilite }}%; background:{% if l.probabilite >= 50 %}#3E8E7E{% else %}#E30613{% endif %};"></span>
+                    </div>
+                </td>
+                <td class="text-end">
+                    {% if l.verdict == 'au-dessus' %}
+                        <span class="badge-verdict badge-au-dessus">Au-dessus</span>
+                    {% elif l.verdict == 'en-dessous' %}
+                        <span class="badge-verdict badge-en-dessous">En dessous</span>
+                    {% else %}
+                        <span class="badge-verdict badge-conforme">Conforme</span>
+                    {% endif %}
                 </td>
             </tr>
         {% endfor %}
@@ -171,7 +384,7 @@
         <details class="details-methode">
             <summary>Détails techniques</summary>
             <div class="bloc-methode">
-                               Trois modèles comparés en validation leave-one-out sur
+                Trois modèles comparés en validation leave-one-out sur
                 {{ performance.n_agences }} agences, sur variables log-transformées.
                 Modèle retenu : {{ performance.modele_retenu }} (R² = {{ performance.r2 }}).
                 <div class="mt-2">
@@ -180,8 +393,15 @@
                     {% endfor %}
                 </div>
                 <div class="mt-2">
-                    Variables explicatives :
-                    {% for f in performance.facteurs %}{{ f.nom }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    Ajustement bayésien hiérarchique (modèle normal-normal, solution analytique).
+                    Dispersion inter-agences τ = {{ performance.bayesien.tau }}, estimée par la
+                    méthode des moments. Coefficient de rappel moyen :
+                    {{ performance.bayesien.rappel_moyen }} %.
+                </div>
+                <div class="mt-2">
+                    L'agence NEO-BTE est écartée de l'analyse : agence digitale sans
+                    activité de crédit propre, son profil n'est comparable à aucune
+                    agence physique.
                 </div>
             </div>
         </details>
@@ -202,14 +422,20 @@ document.addEventListener('DOMContentLoaded', function () {
     Chart.defaults.font.size = 11;
     Chart.defaults.color = '#78819A';
 
+    var COULEURS = {
+        'au-dessus': '#3E8E7E',
+        'en-dessous': '#E30613',
+        'conforme': '#B8C2D8'
+    };
+
     new Chart(canvas, {
         type: 'bar',
         data: {
             labels: lignes.map(function (l) { return l.agence; }),
             datasets: [{
-                data: lignes.map(function (l) { return l.ecart_pct; }),
+                data: lignes.map(function (l) { return l.ecart_ajuste; }),
                 backgroundColor: lignes.map(function (l) {
-                    return l.ecart_pct >= 0 ? '#3E8E7E' : '#E30613';
+                    return COULEURS[l.verdict] || '#B8C2D8';
                 }),
                 borderRadius: 3
             }]
@@ -223,8 +449,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 tooltip: {
                     callbacks: {
                         label: function (ctx) {
-                            var v = ctx.raw;
-                            return (v >= 0 ? '+' : '') + v + " % par rapport à l'attendu";
+                            var l = lignes[ctx.dataIndex];
+                            var v = l.ecart_ajuste;
+                            return [
+                                (v >= 0 ? '+' : '') + v + " % par rapport à l'attendu",
+                                'Réalisé : ' + l.realise,
+                                'Fourchette attendue : ' + l.attendu_min + ' – ' + l.attendu_max
+                            ];
                         }
                     }
                 }

@@ -120,3 +120,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "kpi-bte",
+        "TIMEOUT": 3600,
+        "OPTIONS": {"MAX_ENTRIES": 500},
+    }
+}

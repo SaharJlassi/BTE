@@ -1,0 +1,207 @@
+{% extends 'base.html' %}
+{% block title %}Communautés d'agences — KPI BTE{% endblock %}
+
+{% block extra_head %}
+<style>
+    .zone-graphe { position: relative; height: 560px; width: 100%; }
+    .explication {
+        background: var(--bte-marine-pale);
+        border-radius: 9px; padding: 14px 16px;
+        font-size: 13.5px; line-height: 1.6;
+    }
+    .liste-points { margin: 0; padding-left: 20px; }
+    .liste-points li { margin-bottom: 7px; }
+    .liste-points li:last-child { margin-bottom: 0; }
+    .details-methode summary {
+        cursor: pointer; font-size: 13px; color: var(--texte-doux); padding: 10px 0;
+    }
+    .details-methode summary:hover { color: var(--bte-marine); }
+    .bloc-methode {
+        font-size: 12.5px; color: var(--texte-doux); line-height: 1.7;
+        background: #FAFBFD; border-radius: 8px; padding: 14px 16px;
+    }
+    .pastille {
+        display: inline-block; width: 11px; height: 11px;
+        border-radius: 50%; margin-right: 8px; vertical-align: -1px;
+    }
+    .carte-groupe {
+        border: 1px solid var(--bordure); border-radius: 9px;
+        padding: 15px 17px; height: 100%;
+    }
+    .carte-groupe-titre { font-weight: 600; color: var(--bte-marine); font-size: 14.5px; }
+    .carte-groupe-effectif { font-size: 12.5px; color: var(--texte-doux); margin-bottom: 9px; }
+    .liste-agences { font-size: 12.5px; color: var(--texte-doux); line-height: 1.7; }
+    .trait { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+    .trait-fort { color: #1F7A3D; font-weight: 600; }
+    .trait-faible { color: var(--bte-rouge); font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="entete-page">
+    <div>
+        <h2>Communautés d'agences</h2>
+        <p class="sous-titre">Réseau de similarité · Exercice {{ annee }}</p>
+    </div>
+    <a href="{% url 'analyse_reseau' %}" class="btn btn-secondaire">Voir l'analyse du réseau</a>
+</div>
+
+<form method="get" class="barre-filtres">
+    <div class="row g-3 align-items-end">
+        <div class="col-auto">
+            <label class="form-label">Année</label>
+            <select name="annee" class="form-select form-select-sm">
+                {% for a in annees_dispo %}
+                    <option value="{{ a }}" {% if a == annee %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-principal btn-sm">Analyser</button>
+        </div>
+    </div>
+</form>
+
+{% if not resultat %}
+    <div class="alert alert-warning">
+        Données insuffisantes pour cette analyse sur l'année {{ annee }}.
+    </div>
+{% else %}
+
+<div class="carte mb-4">
+    <div class="carte-entete">Ce qu'il faut retenir</div>
+    <div class="carte-corps">
+        <div class="explication">
+            <ul class="liste-points">
+                {% for p in explications %}
+                    <li>{{ p }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="carte mb-4">
+    <div class="carte-entete">Réseau des agences</div>
+    <div class="carte-corps">
+        <div class="zone-graphe">
+            <svg id="graphe" width="100%" height="100%"></svg>
+        </div>
+        <p style="font-size:12.5px; color:var(--texte-doux); margin:12px 0 0;">
+            Chaque cercle est une agence, sa taille reflète son volume d'activité.
+            Un trait relie deux agences dont l'activité se ressemble.
+            Les couleurs distinguent les communautés détectées.
+        </p>
+    </div>
+</div>
+
+<div class="carte mb-4">
+    <div class="carte-entete">Composition des communautés</div>
+    <div class="carte-corps">
+        <div class="row g-3">
+            {% for g in resultat.groupes %}
+            <div class="col-lg-4 col-md-6">
+                <div class="carte-groupe">
+                    <div class="carte-groupe-titre">
+                        <span class="pastille" data-groupe="{{ g.numero }}"></span>Communauté {{ g.numero }}
+                    </div>
+                    <div class="carte-groupe-effectif">
+                        {{ g.effectif }} agence{{ g.effectif|pluralize }}
+                    </div>
+                    {% for t in g.traits %}
+                    <div class="trait">
+                        <span>{{ t.nom }}</span>
+                        <span class="{% if t.sens == 'fort' %}trait-fort{% else %}trait-faible{% endif %}">
+                            {% if t.ecart > 0 %}+{% endif %}{{ t.ecart }}
+                        </span>
+                    </div>
+                    {% endfor %}
+                    <div class="liste-agences mt-2" style="border-top:1px solid var(--bordure); padding-top:8px;">
+                        {% for a in g.agences %}{{ a }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <details class="details-methode mt-3">
+            <summary>Détails techniques</summary>
+            <div class="bloc-methode">
+                Graphe des {{ resultat.k_voisins }} plus proches voisins, pondéré par
+                noyau gaussien à largeur adaptative. {{ resultat.n_aretes }} arêtes
+                retenues sur {{ resultat.n_agences }} sommets.
+                <div class="mt-2">
+                    Communautés détectées par l'algorithme de Louvain.
+                    Modularité obtenue : {{ resultat.modularite }}
+                    (contre {{ resultat.modularite_aleatoire }} sur des graphes
+                    aléatoires à degrés préservés, soit
+                    {{ resultat.ecart_significatif }} écarts-types au-dessus).
+                    Structure jugée {{ resultat.verdict }}.
+                </div>
+            </div>
+        </details>
+    </div>
+</div>
+
+{{ resultat|json_script:"donnees-graphe" }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var element = document.getElementById('donnees-graphe');
+    var svg = document.getElementById('graphe');
+    if (!element || !svg) { return; }
+
+    var d = JSON.parse(element.textContent);
+    var PALETTE = ['#1B2A5E','#F5B700','#3E8E7E','#B4478F','#E30613','#5B6B99','#C87137'];
+
+    document.querySelectorAll('.pastille[data-groupe]').forEach(function (el) {
+        var g = parseInt(el.dataset.groupe, 10) - 1;
+        el.style.background = PALETTE[g % PALETTE.length];
+    });
+
+    var largeur = svg.clientWidth || 900;
+    var hauteur = svg.clientHeight || 560;
+    var marge = 60;
+
+    function px(x) { return marge + (x + 1) / 2 * (largeur - 2 * marge); }
+    function py(y) { return marge + (y + 1) / 2 * (hauteur - 2 * marge); }
+
+    var volumes = d.noeuds.map(function (n) { return n.volume; });
+    var vmin = Math.min.apply(null, volumes);
+    var vmax = Math.max.apply(null, volumes);
+    function rayon(v) {
+        if (vmax === vmin) { return 9; }
+        return 6 + 10 * Math.sqrt((v - vmin) / (vmax - vmin));
+    }
+
+    var ns = 'http://www.w3.org/2000/svg';
+    var contenu = '';
+
+    d.aretes.forEach(function (a) {
+        var s = d.noeuds[a.source], c = d.noeuds[a.cible];
+        var couleur = a.interne ? PALETTE[(s.communaute - 1) % PALETTE.length] : '#C9D2E4';
+        var opacite = a.interne ? 0.45 : 0.22;
+        contenu += '<line x1="' + px(s.x) + '" y1="' + py(s.y) +
+                   '" x2="' + px(c.x) + '" y2="' + py(c.y) +
+                   '" stroke="' + couleur + '" stroke-width="' + (0.6 + a.poids * 2) +
+                   '" opacity="' + opacite + '"/>';
+    });
+
+    d.noeuds.forEach(function (n) {
+        var couleur = PALETTE[(n.communaute - 1) % PALETTE.length];
+        var r = rayon(n.volume);
+        contenu += '<circle cx="' + px(n.x) + '" cy="' + py(n.y) + '" r="' + r +
+                   '" fill="' + couleur + '" stroke="#fff" stroke-width="2">' +
+                   '<title>' + n.agence + ' — communauté ' + n.communaute +
+                   ' — volume ' + n.volume.toLocaleString('fr-FR') + '</title></circle>';
+        contenu += '<text x="' + px(n.x) + '" y="' + (py(n.y) + r + 11) +
+                   '" text-anchor="middle" font-size="9.5" fill="#78819A" ' +
+                   'font-family="Inter, sans-serif">' +
+                    (n.agence.split(' - ')[1] || n.agence) + '</text>';
+    });
+
+    svg.innerHTML = contenu;
+});
+</script>
+
+{% endif %}
+{% endblock %}

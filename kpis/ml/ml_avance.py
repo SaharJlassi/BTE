@@ -3,14 +3,15 @@ Analyses ML avancées du réseau d'agences.
 
 Trois modules complémentaires à analytics.py :
 
-  1. Performance   : régression du volume attendu, puis lecture des résidus
-                     pour identifier les agences en sur/sous-performance
-  2. Robustesse    : comparaison d'algorithmes de clustering et mesure de
-                     stabilité par bootstrap (indice de Rand ajusté)
-  3. Classement    : score composite multicritère par méthode TOPSIS
+  1. Performance : estimation du volume attendu, intervalles de prédiction
+                   conformes, puis lecture des écarts
+  2. Robustesse  : comparaison d'algorithmes de clustering et mesure de
+                   stabilité par bootstrap (indice de Rand ajusté)
+  3. Classement  : score composite multicritère par méthode TOPSIS
 
-Contexte : 32 observations. Toutes les méthodes retenues sont adaptées
-aux petits échantillons (régularisation, validation leave-one-out).
+Contexte : une trentaine d'observations. Toutes les méthodes retenues
+sont adaptées aux petits échantillons (régularisation, validation
+leave-one-out, inférence conforme).
 """
 
 import numpy as np
@@ -26,16 +27,34 @@ from sklearn.metrics import (
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN
 from sklearn.mixture import GaussianMixture
 
+from .conforme import intervalles_conformes, couverture_empirique
 from .analytics import construire_matrice, preparer_donnees
 
 
-# Cibles proposées pour l'analyse de performance
+# Cibles proposées pour l'analyse de performance.
+#
+# Les crédits sont agrégés toutes familles confondues : pris séparément,
+# le crédit de gestion et le CMLT ont des volumes trop faibles pour que
+# la variation entre agences dépasse le bruit de comptage. Leur somme
+# avec les crédits particuliers donne un indicateur exploitable.
 CIBLES = [
-    ('credits', 'Crédits'),
+    ('comptes', 'Comptes clients'),
+    ('credits_total', 'Crédits (toutes familles)'),
     ('cartes', 'Cartes'),
     ('placements', 'Placements'),
-    ('comptes', 'Comptes clients'),
 ]
+
+# Cibles regroupant plusieurs domaines de la matrice.
+CIBLES_COMPOSITES = {
+    'credits_total': ['credits_pp', 'credits_gestion', 'cmlt'],
+}
+
+# En dessous de ce volume médian par agence, la variation observée
+# relève du bruit de comptage : l'analyse n'est pas conduite.
+SEUIL_VOLUME_MEDIAN = 10
+
+# Niveau de risque des intervalles de prédiction conformes.
+ALPHA_CONFORME = 0.10
 
 
 # ------------------------------------------------------------------
@@ -44,14 +63,25 @@ CIBLES = [
 
 def _domaines(noms_features):
     """
-    Répartit les colonnes de la matrice par domaine métier,
-    d'après le libellé généré dans analytics.construire_matrice.
+    Répartit les colonnes de la matrice par domaine métier.
+
+    Les crédits sont éclatés en trois familles distinctes : leurs volumes
+    diffèrent d'un ordre de grandeur, et les mélanger au niveau des
+    colonnes empêcherait de traiter chaque famille séparément.
     """
-    groupes = {'credits': [], 'cartes': [], 'placements': [], 'tpe': [], 'comptes': []}
+    groupes = {
+        'credits_pp': [], 'credits_gestion': [], 'cmlt': [],
+        'cartes': [], 'placements': [], 'tpe': [], 'comptes': [],
+    }
 
     for j, nom in enumerate(noms_features):
-        if nom.startswith('Crédit') or nom.startswith('Engagement'):
-            groupes['credits'].append(j)
+        minuscule = nom.lower()
+        if 'gestion' in minuscule:
+            groupes['credits_gestion'].append(j)
+        elif 'morale' in minuscule or 'engagement' in minuscule:
+            groupes['cmlt'].append(j)
+        elif any(mot in minuscule for mot in ('voiture', 'mobilier', 'consommation')):
+            groupes['credits_pp'].append(j)
         elif nom.startswith('Carte'):
             groupes['cartes'].append(j)
         elif nom.startswith('Placement'):
@@ -65,10 +95,10 @@ def _domaines(noms_features):
 
 
 # ------------------------------------------------------------------
-# 1. Performance : régression et analyse des résidus
+# 1. Performance : niveau attendu et intervalles conformes
 # ------------------------------------------------------------------
 
-def analyser_performance(annee, cible='credits'):
+def analyser_performance(annee, cible='comptes'):
     """
     Compare le volume réalisé d'un domaine d'activité au volume attendu.
 
@@ -82,25 +112,34 @@ def analyser_performance(annee, cible='credits'):
       3. Forêt aléatoire sur ces mêmes deux variables.
 
     Le choix de deux variables au maximum est imposé par la taille de
-    l'échantillon : avec 32 agences, un modèle à quinze variables
-    apprend le bruit et se comporte moins bien que la moyenne.
+    l'échantillon : sur une trentaine d'agences, un modèle à quinze
+    variables apprend le bruit et se comporte moins bien que la moyenne.
 
-    Le modèle retenu est celui dont le R² en validation leave-one-out
-    est le meilleur ; si aucun modèle appris ne dépasse le ratio de
-    référence, c'est ce dernier qui est utilisé.
+    Le niveau attendu est assorti d'un intervalle de prédiction conforme :
+    une agence n'est déclarée en écart que si son résultat sort de cet
+    intervalle, et non parce qu'il s'écarte du point central.
+
+    L'analyse n'est pas conduite si le volume médian par agence est trop
+    faible : la variation observée relèverait alors du hasard.
     """
     noms_agences, noms_features, matrice = construire_matrice(annee)
     if len(noms_agences) < 8:
         return None
 
     groupes = _domaines(noms_features)
-    colonnes_cible = groupes.get(cible, [])
+
+    # Une cible composite regroupe plusieurs domaines : tous doivent être
+    # écartés des variables explicatives, sans quoi le modèle prédirait
+    # une partie de la cible par elle-même.
+    domaines_cible = CIBLES_COMPOSITES.get(cible, [cible])
+
+    colonnes_cible = [j for d in domaines_cible for j in groupes.get(d, [])]
     if not colonnes_cible:
         return None
 
     colonnes_autres = [
         j for domaine, indices in groupes.items()
-        if domaine != cible for j in indices
+        if domaine not in domaines_cible for j in indices
     ]
     if len(colonnes_autres) < 2:
         return None
@@ -111,12 +150,30 @@ def analyser_performance(annee, cible='credits'):
     if volume_autres.sum() == 0 or volume_cible.sum() == 0:
         return None
 
+    # --- Contrôle de volume ---
+    # Sur des comptages très faibles, l'écart entre agences n'est que du
+    # bruit d'échantillonnage : aucun modèle ne peut le prédire, et le
+    # présenter comme une performance induirait en erreur.
+    volume_median = float(np.median(volume_cible))
+    if volume_median < SEUIL_VOLUME_MEDIAN:
+        return {
+            'insuffisant': True,
+            'cible': cible,
+            'cible_libelle': dict(CIBLES).get(cible, cible),
+            'volume_total': int(volume_cible.sum()),
+            'volume_median': int(volume_median),
+            'seuil': SEUIL_VOLUME_MEDIAN,
+            'n_agences': len(noms_agences),
+        }
+
     # --- Variables explicatives : deux seulement ---
-    # 1. Le volume d'activité de l'agence hors domaine cible
-    # 2. L'orientation professionnelle de son portefeuille
+    # 1. Le volume d'activité de l'agence, hors domaine cible
+    # 2. L'orientation professionnelle de son portefeuille, mesurée hors
+    #    colonnes de la cible pour éviter toute fuite d'information.
     indices_pro = [
         j for j, nom in enumerate(noms_features)
-        if 'PM ' in nom or 'morale' in nom.lower() or 'gestion' in nom.lower()
+        if j not in colonnes_cible
+        and ('PM ' in nom or 'morale' in nom.lower() or 'gestion' in nom.lower())
     ]
     volume_pro = matrice[:, indices_pro].sum(axis=1) if indices_pro else np.zeros(len(noms_agences))
     total_ligne = np.maximum(matrice.sum(axis=1), 1.0)
@@ -173,153 +230,83 @@ def analyser_performance(annee, cible='credits'):
     meilleur = max(candidats, key=lambda m: m['r2'])
     predictions = meilleur['predictions']
 
+    # --- Intervalles de prédiction conformes ---
+    basse_log, haute_log, demi_largeur = intervalles_conformes(
+        y, predictions, alpha=ALPHA_CONFORME
+    )
+    couverture = couverture_empirique(y, basse_log, haute_log)
+
     residus = y - predictions
     ecart_type = float(np.std(residus)) or 1.0
 
     lignes = []
+    n_au_dessus = n_en_dessous = n_conforme = 0
+
     for i, nom in enumerate(noms_agences):
         realise = float(np.expm1(y[i]))
         attendu = float(np.expm1(predictions[i]))
-        if attendu <= 0:
-            ecart_pct = 0.0
+        attendu_min = float(np.expm1(basse_log[i]))
+        attendu_max = float(np.expm1(haute_log[i]))
+
+        ecart_pct = (realise / attendu - 1.0) * 100 if attendu > 0 else 0.0
+
+        # Le verdict repose sur la fourchette, non sur le point central :
+        # un résultat dans l'intervalle est conforme à l'attendu.
+        if realise > attendu_max:
+            verdict = 'au-dessus'
+            n_au_dessus += 1
+        elif realise < attendu_min:
+            verdict = 'en-dessous'
+            n_en_dessous += 1
         else:
-            ecart_pct = (realise / attendu - 1.0) * 100
+            verdict = 'conforme'
+            n_conforme += 1
+
         lignes.append({
             'agence': nom,
             'realise': int(round(realise)),
             'attendu': int(round(max(attendu, 0))),
+            'attendu_min': int(round(max(attendu_min, 0))),
+            'attendu_max': int(round(max(attendu_max, 0))),
             'ecart_pct': round(float(np.clip(ecart_pct, -100, 500)), 1),
             'residu_std': round(float(residus[i] / ecart_type), 2),
+            'verdict_conforme': verdict,
         })
 
     lignes.sort(key=lambda l: -l['ecart_pct'])
 
     facteurs = [
-        {'nom': "Volume d'activité de l'agence hors " + dict(CIBLES).get(cible, cible).lower()},
+        {'nom': "Volume d'activité de l'agence hors "
+                + dict(CIBLES).get(cible, cible).lower()},
         {'nom': "Orientation professionnelle du portefeuille"},
     ]
+
     sur = [l for l in lignes if l['residu_std'] >= 1.0]
     sous = [l for l in lignes if l['residu_std'] <= -1.0]
 
     return {
+        'insuffisant': False,
         'cible': cible,
         'cible_libelle': dict(CIBLES).get(cible, cible),
+        'volume_total': int(volume_cible.sum()),
+        'volume_median': int(volume_median),
         'modele_retenu': meilleur['nom'],
         'r2': meilleur['r2'],
         'comparaison': [
             {'nom': m['nom'], 'r2': m['r2'], 'mae': m['mae']}
             for m in candidats
         ],
-        'lignes': lignes,
-        'facteurs': facteurs,
-        'sur_performance': sur,
-        'sous_performance': sous,
-        'n_agences': len(noms_agences),
-    }
-    """
-    Estime le volume attendu d'un domaine d'activité à partir des autres
-    caractéristiques de l'agence, puis compare au réalisé.
-
-    L'écart (résidu) distingue les agences qui font mieux ou moins bien
-    que ce que leur profil laisserait prévoir. Travail en échelle
-    logarithmique : les résidus s'interprètent alors en pourcentage.
-    """
-    noms_agences, noms_features, matrice = construire_matrice(annee)
-    if len(noms_agences) < 8:
-        return None
-
-    groupes = _domaines(noms_features)
-    colonnes_cible = groupes.get(cible, [])
-    if not colonnes_cible:
-        return None
-
-    colonnes_explicatives = [
-        j for domaine, indices in groupes.items()
-        if domaine != cible for j in indices
-    ]
-    if len(colonnes_explicatives) < 3:
-        return None
-
-    # Échelle log : atténue l'effet des écarts de taille entre agences
-    y = np.log1p(matrice[:, colonnes_cible].sum(axis=1))
-    X = np.log1p(matrice[:, colonnes_explicatives])
-    X = StandardScaler().fit_transform(X)
-
-    if np.std(y) < 1e-6:
-        return None
-
-    validation = LeaveOneOut()
-
-    # Modèle linéaire régularisé : alpha choisi par validation interne
-    ridge = RidgeCV(alphas=np.logspace(-2, 3, 30))
-    y_ridge = cross_val_predict(ridge, X, y, cv=validation)
-
-    # Modèle non linéaire, en comparaison
-    foret = RandomForestRegressor(n_estimators=300, min_samples_leaf=2, random_state=0)
-    y_foret = cross_val_predict(foret, X, y, cv=validation)
-
-    modeles = {
-        'ridge': {
-            'nom': 'Régression régularisée (Ridge)',
-            'r2': round(float(r2_score(y, y_ridge)), 3),
-            'mae': round(float(mean_absolute_error(y, y_ridge)), 3),
-            'predictions': y_ridge,
+        'conforme': {
+            'alpha': ALPHA_CONFORME,
+            'niveau': int((1 - ALPHA_CONFORME) * 100),
+            'demi_largeur': round(float(demi_largeur), 3),
+            'baisse_pct': round((1 - float(np.exp(-demi_largeur))) * 100, 1),
+            'hausse_pct': round((float(np.exp(demi_largeur)) - 1) * 100, 1),
+            'couverture': round(couverture * 100, 1),
+            'n_au_dessus': n_au_dessus,
+            'n_en_dessous': n_en_dessous,
+            'n_conforme': n_conforme,
         },
-        'foret': {
-            'nom': 'Forêt aléatoire',
-            'r2': round(float(r2_score(y, y_foret)), 3),
-            'mae': round(float(mean_absolute_error(y, y_foret)), 3),
-            'predictions': y_foret,
-        },
-    }
-
-    meilleur = max(modeles.values(), key=lambda m: m['r2'])
-    predictions = meilleur['predictions']
-
-    # Résidus : en log, un écart de 0,22 correspond à environ +25 %
-    residus = y - predictions
-    ecart_type = float(np.std(residus)) or 1.0
-
-    lignes = []
-    for i, nom in enumerate(noms_agences):
-        realise = float(np.expm1(y[i]))
-        attendu = float(np.expm1(predictions[i]))
-        ecart_relatif = (np.expm1(residus[i]) - 1) * 100 if residus[i] else 0.0
-        lignes.append({
-            'agence': nom,
-            'realise': int(round(realise)),
-            'attendu': int(round(max(attendu, 0))),
-            'ecart_pct': round(float(ecart_relatif), 1),
-            'residu_std': round(float(residus[i] / ecart_type), 2),
-        })
-
-    lignes.sort(key=lambda l: -l['ecart_pct'])
-
-    # Poids des variables explicatives (modèle linéaire)
-    ridge.fit(X, y)
-    poids = ridge.coef_
-    ordre = np.argsort(-np.abs(poids))[:6]
-    facteurs = [
-        {
-            'nom': noms_features[colonnes_explicatives[j]],
-            'poids': round(float(poids[j]), 3),
-            'sens': 'positif' if poids[j] > 0 else 'négatif',
-        }
-        for j in ordre
-    ]
-
-    sur = [l for l in lignes if l['residu_std'] >= 1.0]
-    sous = [l for l in lignes if l['residu_std'] <= -1.0]
-
-    return {
-        'cible': cible,
-        'cible_libelle': dict(CIBLES).get(cible, cible),
-        'modele_retenu': meilleur['nom'],
-        'r2': meilleur['r2'],
-        'comparaison': [
-            {'nom': m['nom'], 'r2': m['r2'], 'mae': m['mae']}
-            for m in modeles.values()
-        ],
         'lignes': lignes,
         'facteurs': facteurs,
         'sur_performance': sur,
@@ -492,10 +479,10 @@ def evaluer_robustesse(annee, k=None, n_tirages=60):
 
 CRITERES_SCORE = [
     ('comptes', 'Comptes clients'),
-    ('credits', 'Crédits'),
+    ('credits_pp', 'Crédits particuliers'),
+    ('credits_gestion', 'Crédits de gestion'),
     ('cartes', 'Cartes'),
     ('placements', 'Placements'),
-    ('tpe', 'TPE'),
 ]
 
 
@@ -592,19 +579,34 @@ def expliquer_performance(resultat):
     if not resultat:
         return []
 
+    cible = resultat['cible_libelle'].lower()
+
+    if resultat.get('insuffisant'):
+        return [
+            f"Le réseau ne compte que {resultat['volume_total']} dossiers de "
+            f"{cible} en tout, soit environ {resultat['volume_median']} par agence.",
+            "Sur des volumes aussi faibles, l'écart entre deux agences relève "
+            "du hasard plutôt que de la performance : une agence à 1 dossier et "
+            "une agence à 3 ne sont pas comparables.",
+            "L'analyse n'est donc pas conduite pour ce produit. Choisissez une "
+            "activité à volume plus élevé dans le menu ci-dessus.",
+        ]
+
     points = []
     r2 = resultat['r2']
-    cible = resultat['cible_libelle'].lower()
 
     if r2 < 0:
         points.append(
             f"Le niveau de {cible} d'une agence ne se déduit pas de son activité "
-            "sur les autres produits : les écarts ci-dessous sont donc à considérer "
-            "comme des repères, pas comme un jugement de performance."
+            "sur les autres produits."
         )
         points.append(
-            "Ce constat a du sens : la politique de crédit d'une agence dépend "
-            "surtout du tissu économique local, que ces données ne décrivent pas."
+            "Ce constat a du sens : ce produit dépend surtout du tissu économique "
+            "local et de la clientèle de l'agence, informations absentes de ces données."
+        )
+        points.append(
+            "Les écarts ci-dessous restent lisibles comme des repères, "
+            "mais ne constituent pas un jugement de performance."
         )
     elif r2 < 0.3:
         points.append(
@@ -622,21 +624,9 @@ def expliquer_performance(resultat):
             "l'activité de l'agence sur les autres produits."
         )
 
-    n_sur = len(resultat['sur_performance'])
-    n_sous = len(resultat['sous_performance'])
-
-    if n_sur:
-        noms = ", ".join(l['agence'] for l in resultat['sur_performance'][:3])
-        points.append(f"{n_sur} agences dépassent nettement leur niveau attendu, dont {noms}.")
-    if n_sous:
-        noms = ", ".join(l['agence'] for l in resultat['sous_performance'][:3])
-        points.append(f"{n_sous} agences restent nettement en dessous, dont {noms}.")
-    if not n_sur and not n_sous:
-        points.append("Aucune agence ne s'écarte fortement de son niveau attendu.")
-
     points.append(
-        "Lecture de l'écart : +30 % signifie que l'agence réalise un tiers de plus "
-        "que le niveau estimé pour elle."
+        f"Volume analysé : {resultat['volume_total']} dossiers sur le réseau, "
+        f"soit environ {resultat['volume_median']} par agence."
     )
     return points
 
@@ -651,31 +641,39 @@ def expliquer_robustesse(resultat):
 
     if verdict == 'stable':
         points.append(
-            "Le découpage en familles est fiable : il se reproduit presque à l'identique "
-            "quand on refait le calcul sur d'autres échantillons."
+            "Le découpage en familles est fiable : il se reproduit presque à "
+            "l'identique quand on refait le calcul sur d'autres échantillons."
         )
     elif verdict == 'moyennement stable':
         points.append(
-            "Le découpage est globalement fiable, avec quelques agences qui changent "
-            "de famille selon le calcul."
+            "Le découpage est globalement fiable, avec quelques agences qui "
+            "changent de famille selon le calcul."
         )
     elif verdict == 'peu stable':
         points.append(
-            "Le découpage varie sensiblement d'un calcul à l'autre : à utiliser comme "
-            "une indication, pas comme une classification définitive."
+            "Le découpage varie sensiblement d'un calcul à l'autre : à utiliser "
+            "comme une indication, pas comme une classification définitive."
         )
     else:
         points.append(
-            "Le découpage n'est pas reproductible : les agences changent souvent de famille. "
-            "Il vaut mieux raisonner en tendances qu'en groupes."
+            "Le découpage n'est pas reproductible : les agences changent souvent "
+            "de famille. Il vaut mieux raisonner en tendances qu'en groupes."
         )
 
-    points.append(f"Mesure de reproductibilité : {ari} sur 1 (test répété {resultat['n_tirages']} fois).")
+    points.append(
+        f"Mesure de reproductibilité : {ari} sur 1 "
+        f"(test répété {resultat['n_tirages']} fois)."
+    )
 
-    meilleurs = [c for c in resultat['comparaison'] if not c['echec'] and c['silhouette'] is not None]
+    meilleurs = [
+        c for c in resultat['comparaison']
+        if not c['echec'] and c['silhouette'] is not None
+    ]
     if meilleurs:
         gagnant = max(meilleurs, key=lambda c: c['silhouette'])
-        points.append(f"Parmi les méthodes testées, {gagnant['nom']} donne le découpage le plus net.")
+        points.append(
+            f"Parmi les méthodes testées, {gagnant['nom']} donne le découpage le plus net."
+        )
 
     if resultat['moins_stables']:
         noms = ", ".join(f['agence'] for f in resultat['moins_stables'][:3])
@@ -702,5 +700,7 @@ def expliquer_scores(resultat):
         queue = ", ".join(c['agence'] for c in classement[-3:])
         points.append(f"En fin de classement : {queue}.")
 
-    points.append("Les pondérations sont modifiables : ajustez-les selon les priorités du moment.")
+    points.append(
+        "Les pondérations sont modifiables : ajustez-les selon les priorités du moment."
+    )
     return points

@@ -1,14 +1,14 @@
 """
-Module d'analyse avancée du réseau d'agences.
+Module d'analyse du réseau d'agences.
 
 Trois méthodes non supervisées appliquées à une coupe transversale
-(une année, 32 agences) :
+(une année, une agence par ligne) :
 
-  1. Segmentation   : ACP + K-Means, k choisi par score de silhouette
-  2. Anomalies      : Isolation Forest sur l'espace standardisé
-  3. Profils latents: NMF sur la matrice agence x produit
+  1. Segmentation    : ACP + K-Means, k choisi par score de silhouette
+  2. Anomalies       : Isolation Forest sur l'espace standardisé
+  3. Profils latents : NMF sur la matrice agence x produit
 
-Parti pris méthodologique : les agences sont décrites par la REPARTITION
+Parti pris méthodologique : les agences sont décrites par la RÉPARTITION
 de leur activité (données compositionnelles) et non par des volumes bruts,
 afin que la segmentation capture le modèle commercial et non la taille.
 La taille est réintroduite comme variable distincte, en échelle log.
@@ -21,16 +21,26 @@ from sklearn.decomposition import PCA, NMF
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.ensemble import IsolationForest
-
+from .lda import extraire_profils_lda, expliquer_lda
 from django.db.models import Sum
-
+from .anomalies import detecter_anomalies_test, expliquer_anomalies, lignes_lisibles
 from kpis.models import (
     Agence, CompteClient, Credit, VenteCarte, VenteTPE, Placement,
 )
 
 
+# Agences écartées des analyses statistiques.
+#
+# NEO-BTE (031) est l'agence digitale : elle centralise les ouvertures de
+# comptes et la délivrance de cartes pour l'ensemble du réseau, sans activité
+# de crédit propre (1 dossier de crédit pour 82 783 opérations par ailleurs).
+# Son profil n'est comparable à aucune agence physique et fausse toute
+# estimation portant sur le réseau.
+AGENCES_EXCLUES = ['031']
+
+
 # Regroupement des 23 types de cartes en 7 familles produit,
-# pour limiter la dimensionnalité (32 observations seulement).
+# pour limiter la dimensionnalité (une trentaine d'observations seulement).
 FAMILLES_CARTES = {
     'VCENA': 'Visa classique', 'VCENI': 'Visa classique',
     'VBSNI': 'Visa classique', 'VBSNIP': 'Visa classique',
@@ -69,9 +79,10 @@ def construire_matrice(annee):
     Renvoie (noms_agences, noms_features, matrice_comptages).
 
     matrice_comptages : tableau (n_agences x n_features) de comptages bruts.
-    Seules les agences présentant au moins une donnée sont retenues.
+    Les agences listées dans AGENCES_EXCLUES sont écartées, ainsi que
+    celles ne présentant aucune donnée pour l'année demandée.
     """
-    agences = list(Agence.objects.all())
+    agences = list(Agence.objects.exclude(code_agence__in=AGENCES_EXCLUES))
     index_agence = {a.id: i for i, a in enumerate(agences)}
 
     # --- Définition des colonnes ---
@@ -97,37 +108,45 @@ def construire_matrice(annee):
     matrice = np.zeros((len(agences), len(colonnes)), dtype=float)
 
     # --- Remplissage ---
+    # Les lignes rattachées à une agence exclue sont ignorées silencieusement.
     for ligne in (CompteClient.objects.filter(annee=annee)
                   .values('agence_id', 'categorie__libelle')
                   .annotate(total=Sum('nombre'))):
+        i = index_agence.get(ligne['agence_id'])
         cle = ('compte', ligne['categorie__libelle'])
-        if cle in index_colonne:
-            matrice[index_agence[ligne['agence_id']], index_colonne[cle]] += ligne['total'] or 0
+        if i is not None and cle in index_colonne:
+            matrice[i, index_colonne[cle]] += ligne['total'] or 0
 
     for ligne in (Credit.objects.filter(annee=annee)
                   .values('agence_id', 'categorie')
                   .annotate(total=Sum('nombre'))):
+        i = index_agence.get(ligne['agence_id'])
         cle = ('credit', ligne['categorie'])
-        if cle in index_colonne:
-            matrice[index_agence[ligne['agence_id']], index_colonne[cle]] += ligne['total'] or 0
+        if i is not None and cle in index_colonne:
+            matrice[i, index_colonne[cle]] += ligne['total'] or 0
 
     for ligne in (VenteCarte.objects.filter(annee=annee)
                   .values('agence_id', 'type_carte__code')
                   .annotate(total=Sum('nombre'))):
+        i = index_agence.get(ligne['agence_id'])
+        if i is None:
+            continue
         famille = FAMILLES_CARTES.get(ligne['type_carte__code'], 'Autres')
-        cle = ('carte', famille)
-        matrice[index_agence[ligne['agence_id']], index_colonne[cle]] += ligne['total'] or 0
+        matrice[i, index_colonne[('carte', famille)]] += ligne['total'] or 0
 
     for ligne in (Placement.objects.filter(annee=annee)
                   .values('agence_id', 'type_placement__libelle')
                   .annotate(total=Sum('nombre'))):
+        i = index_agence.get(ligne['agence_id'])
         cle = ('placement', ligne['type_placement__libelle'])
-        if cle in index_colonne:
-            matrice[index_agence[ligne['agence_id']], index_colonne[cle]] += ligne['total'] or 0
+        if i is not None and cle in index_colonne:
+            matrice[i, index_colonne[cle]] += ligne['total'] or 0
 
     for ligne in (VenteTPE.objects.filter(annee=annee)
                   .values('agence_id').annotate(total=Sum('nombre'))):
-        matrice[index_agence[ligne['agence_id']], index_colonne[('tpe', 'TPE')]] += ligne['total'] or 0
+        i = index_agence.get(ligne['agence_id'])
+        if i is not None:
+            matrice[i, index_colonne[('tpe', 'TPE')]] += ligne['total'] or 0
 
     # --- Retrait des agences sans aucune donnée ---
     actives = matrice.sum(axis=1) > 0
@@ -354,59 +373,6 @@ def extraire_profils_latents(parts, noms_agences, noms_features, n_profils=3):
 
 
 # ------------------------------------------------------------------
-# Point d'entrée
-# ------------------------------------------------------------------
-
-def analyser_reseau(annee, n_profils=3):
-    """
-    Exécute les trois analyses et renvoie un dictionnaire prêt
-    pour l'affichage, ou None si les données sont insuffisantes.
-    """
-    noms_agences, noms_features, matrice = construire_matrice(annee)
-
-    if len(noms_agences) < 5 or len(noms_features) < 3:
-        return None
-
-    parts, donnees_std = preparer_donnees(matrice)
-
-    segmentation = segmenter(donnees_std, noms_features)
-    if segmentation is None:
-        return None
-
-    groupes = caracteriser_groupes(donnees_std, segmentation['etiquettes'], noms_features)
-    anomalies, predictions = detecter_anomalies(donnees_std, noms_agences, noms_features)
-    latents = extraire_profils_latents(parts, noms_agences, noms_features, n_profils)
-
-    # Points du plan factoriel, pour le nuage de points
-    points = []
-    for i, nom in enumerate(noms_agences):
-        points.append({
-            'agence': nom,
-            'x': round(float(segmentation['coordonnees'][i, 0]), 3),
-            'y': round(float(segmentation['coordonnees'][i, 1]), 3),
-            'groupe': int(segmentation['etiquettes'][i]) + 1,
-            'anomalie': bool(predictions[i] == -1),
-            'volume': int(matrice[i].sum()),
-        })
-
-    resultat = {
-        'n_agences': len(noms_agences),
-        'n_variables': len(noms_features) + 1,
-        'k': segmentation['k'],
-        'silhouette': segmentation['silhouette'],
-        'variance_totale': segmentation['variance_totale'],
-        'axes': segmentation['axes'],
-        'balayage': segmentation['balayage'],
-        'groupes': groupes,
-        'points': points,
-        'anomalies': anomalies,
-        'latents': latents,
-    }
-    resultat['explications'] = rediger_explications(resultat)
-    return resultat
-    
-    
-    # ------------------------------------------------------------------
 # Génération des explications en langage courant
 # ------------------------------------------------------------------
 
@@ -417,7 +383,9 @@ def _formuler_orientation(traits):
 
     phrase = ""
     if forts:
-        phrase = "Ces agences se distinguent par " + " et ".join(f"leur activité sur {f.lower()}" for f in forts)
+        phrase = "Ces agences se distinguent par " + " et ".join(
+            f"leur activité sur {f.lower()}" for f in forts
+        )
     if faibles:
         liaison = ", mais restent en retrait sur " if phrase else "Ces agences sont surtout en retrait sur "
         phrase += liaison + faibles[0].lower()
@@ -449,7 +417,7 @@ def rediger_explications(resultat):
     sil = resultat['silhouette']
     var = resultat['variance_totale']
 
-    # --- Points clés, sous forme de liste ---
+    # --- Points clés ---
     points_cles = []
 
     if sil >= 0.5:
@@ -465,31 +433,40 @@ def rediger_explications(resultat):
 
     petits = [g for g in resultat['groupes'] if g['effectif'] == 1]
     if petits:
-        points_cles.append(f"{len(petits)} groupe ne contient qu'une agence : c'est un cas isolé, pas une famille.")
-
+        points_cles.append(
+            f"{len(petits)} groupe ne contient qu'une agence : c'est un cas isolé, pas une famille."
+        )
     anomalies = resultat['anomalies']
     if anomalies:
         noms = ", ".join(a['agence'] for a in anomalies)
-        points_cles.append(f"{len(anomalies)} agences sortent de l'ordinaire : {noms}.")
-        points_cles.append("Sortir de l'ordinaire n'est pas un problème : c'est une activité différente du reste du réseau.")
+        points_cles.append(f"{len(anomalies)} agences ont un profil réellement atypique : {noms}.")
+        points_cles.append(
+            "Sortir de l'ordinaire n'est pas un problème : c'est une activité "
+            "différente du reste du réseau."
+        )
     else:
-        points_cles.append("Aucune agence ne se démarque : toutes fonctionnent de façon comparable.")
+        points_cles.append(
+            "Aucune agence ne se démarque de façon établie : les écarts observés "
+            "restent dans ce que le hasard peut produire."
+        )
 
-    # --- Lecture de la carte, en points ---
+    # --- Lecture de la carte ---
     axe1 = resultat['axes'][0]['variables']
     axe2 = resultat['axes'][1]['variables']
     pos1 = [v['nom'] for v in axe1 if v['poids'] > 0][:1]
     neg1 = [v['nom'] for v in axe1 if v['poids'] < 0][:1]
     pos2 = [v['nom'] for v in axe2 if v['poids'] > 0][:1]
 
-    points_carte = ["Chaque point est une agence ; deux agences proches travaillent de façon similaire."]
+    points_carte = [
+        "Chaque point est une agence ; deux agences proches travaillent de façon similaire."
+    ]
     if pos1 and neg1:
-        points_carte.append(
-            f"De gauche à droite : de {neg1[0].lower()} vers {pos1[0].lower()}."
-        )
+        points_carte.append(f"De gauche à droite : de {neg1[0].lower()} vers {pos1[0].lower()}.")
     if pos2:
         points_carte.append(f"Vers le haut : les agences les plus actives sur {pos2[0].lower()}.")
-    points_carte.append(f"La carte résume {var}% de l'information : une bonne vue d'ensemble, sans tous les détails.")
+    points_carte.append(
+        f"La carte résume {var}% de l'information : une bonne vue d'ensemble, sans tous les détails."
+    )
     points_carte.append("Un cercle rouge signale une agence qui sort de l'ordinaire.")
 
     # --- Commentaire par groupe ---
@@ -502,17 +479,8 @@ def rediger_explications(resultat):
         commentaires_groupes[g['numero']] = texte
 
     # --- Détail des agences atypiques ---
-    lignes_anomalies = []
-    for a in anomalies:
-        lignes_anomalies.append({
-            'agence': a['agence'],
-            'phrase': (
-                f"Fait {_qualifier_ecart(a['ecart'])} plus de {a['variable'].lower()} que la moyenne."
-                if a['ecart'] > 0 else
-                f"Fait {_qualifier_ecart(a['ecart'])} moins de {a['variable'].lower()} que la moyenne."
-            ),
-        })
-
+   
+    lignes_anomalies = lignes_lisibles(resultat.get('test_anomalies'))
     # --- Profils types ---
     profils_nommes = []
     for p in resultat['latents']['profils']:
@@ -542,3 +510,64 @@ def rediger_explications(resultat):
         'profils': profils_nommes,
         'points_melanges': points_melanges,
     }
+
+
+# ------------------------------------------------------------------
+# Point d'entrée
+# ------------------------------------------------------------------
+
+def analyser_reseau(annee, n_profils=3):
+    """
+    Exécute les trois analyses et renvoie un dictionnaire prêt
+    pour l'affichage, ou None si les données sont insuffisantes.
+    """
+    noms_agences, noms_features, matrice = construire_matrice(annee)
+
+    if len(noms_agences) < 5 or len(noms_features) < 3:
+        return None
+
+    parts, donnees_std = preparer_donnees(matrice)
+
+    segmentation = segmenter(donnees_std, noms_features)
+    if segmentation is None:
+        return None
+
+    groupes = caracteriser_groupes(donnees_std, segmentation['etiquettes'], noms_features)
+    test_anomalies = detecter_anomalies_test(donnees_std, noms_agences, noms_features)
+    anomalies = test_anomalies['signalees'] if test_anomalies else []
+    signalees_noms = {a['agence'] for a in anomalies}   
+    # NMF conservée pour comparaison : deux décompositions indépendantes
+    # qui convergent renforcent la lecture des profils.
+    latents = extraire_profils_latents(parts, noms_agences, noms_features, n_profils)
+    lda = extraire_profils_lda(matrice, noms_agences, noms_features)
+    # Points du plan factoriel, pour le nuage de points
+    points = []
+    for i, nom in enumerate(noms_agences):
+        points.append({
+            'agence': nom,
+            'x': round(float(segmentation['coordonnees'][i, 0]), 3),
+            'y': round(float(segmentation['coordonnees'][i, 1]), 3),
+            'groupe': int(segmentation['etiquettes'][i]) + 1,
+            'anomalie': nom in signalees_noms,
+            'volume': int(matrice[i].sum()),
+        })
+
+    resultat = {
+        'n_agences': len(noms_agences),
+        'n_variables': len(noms_features) + 1,
+        'k': segmentation['k'],
+        'silhouette': segmentation['silhouette'],
+        'variance_totale': segmentation['variance_totale'],
+        'axes': segmentation['axes'],
+        'balayage': segmentation['balayage'],
+        'groupes': groupes,
+        'points': points,
+        'anomalies': anomalies,
+        'latents': latents,
+    }
+    resultat['test_anomalies'] = test_anomalies
+    resultat['exp_anomalies'] = expliquer_anomalies(test_anomalies)
+    resultat['lda'] = lda
+    resultat['exp_lda'] = expliquer_lda(lda)
+    resultat['explications'] = rediger_explications(resultat)
+    return resultat
