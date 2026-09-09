@@ -29,7 +29,7 @@ from sklearn.mixture import GaussianMixture
 
 from .conforme import intervalles_conformes, couverture_empirique
 from .analytics import construire_matrice, preparer_donnees
-
+from .poisson import ajuster_poisson, r2_pseudo
 
 # Cibles proposées pour l'analyse de performance.
 #
@@ -205,7 +205,12 @@ def analyser_performance(annee, cible='comptes'):
         n_estimators=300, min_samples_leaf=3, max_depth=4, random_state=0
     )
     predictions_foret = cross_val_predict(foret, X, y, cv=validation)
-
+    # --- Modèle 4 : régression de Poisson ---
+    # Les trois modèles précédents travaillent sur log(volume_cible),
+    # transformation choisie pour la régression linéaire. Le GLM Poisson
+    # prend directement les comptages en entrée et gère le lien
+    # logarithmique en interne.
+    resultat_poisson = ajuster_poisson(X, volume_cible)
     candidats = [
         {
             'nom': 'Ratio de référence du réseau',
@@ -226,6 +231,15 @@ def analyser_performance(annee, cible='comptes'):
             'predictions': predictions_foret,
         },
     ]
+
+    if resultat_poisson is not None:
+        predictions_poisson = resultat_poisson['predictions_log']
+        candidats.append({
+            'nom': 'Régression de Poisson',
+            'r2': round(r2_pseudo(y, predictions_poisson), 3),
+            'mae': round(float(mean_absolute_error(y, predictions_poisson)), 3),
+            'predictions': predictions_poisson,
+        })
 
     meilleur = max(candidats, key=lambda m: m['r2'])
     predictions = meilleur['predictions']

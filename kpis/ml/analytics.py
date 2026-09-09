@@ -28,7 +28,7 @@ from kpis.models import (
     Agence, CompteClient, Credit, VenteCarte, VenteTPE, Placement,
 )
 
-
+from .coda import preparer_donnees_coda, comparer_representations
 # Agences écartées des analyses statistiques.
 #
 # NEO-BTE (031) est l'agence digitale : elle centralise les ouvertures de
@@ -174,13 +174,21 @@ def construire_matrice(annee):
     return noms_agences, noms_features, matrice
 
 
-def preparer_donnees(matrice):
+def preparer_donnees(matrice, compositionnel=True):
     """
-    Transforme les comptages bruts en un espace exploitable :
-      - parts relatives (profil d'activité, indépendant de la taille)
-      - taille en échelle log, ajoutée comme variable distincte
-      - standardisation finale
+    Transforme les comptages bruts en un espace exploitable.
+
+    Par défaut, les parts d'activité sont traitées comme des données
+    compositionnelles (transformation log-rapport centré), ce qui
+    corrige les distances et supprime les corrélations induites par la
+    contrainte de somme.
+
+    Le paramètre permet de revenir à la standardisation directe des
+    parts, afin de comparer les deux représentations.
     """
+    if compositionnel:
+        return preparer_donnees_coda(matrice)
+
     totaux = matrice.sum(axis=1, keepdims=True)
     totaux[totaux == 0] = 1.0
     parts = matrice / totaux
@@ -191,8 +199,6 @@ def preparer_donnees(matrice):
     donnees_std = StandardScaler().fit_transform(donnees)
 
     return parts, donnees_std
-
-
 # ------------------------------------------------------------------
 # 1. Segmentation : ACP + K-Means
 # ------------------------------------------------------------------
@@ -528,10 +534,23 @@ def analyser_reseau(annee, n_profils=3):
 
     parts, donnees_std = preparer_donnees(matrice)
 
+    
     segmentation = segmenter(donnees_std, noms_features)
     if segmentation is None:
         return None
 
+    # Contrôle de l'apport du traitement compositionnel : la même
+    # procédure de segmentation est appliquée aux deux représentations.
+    def _segmenter_pour_comparaison(donnees):
+        meilleur_score, meilleures_etiquettes = -1.0, None
+        for k in range(2, min(7, donnees.shape[0] - 1)):
+            etiquettes = KMeans(n_clusters=k, n_init=25, random_state=0).fit_predict(donnees)
+            score = silhouette_score(donnees, etiquettes)
+            if score > meilleur_score:
+                meilleur_score, meilleures_etiquettes = score, etiquettes
+        return meilleures_etiquettes, meilleur_score
+
+    comparaison_espaces = comparer_representations(matrice, _segmenter_pour_comparaison)
     groupes = caracteriser_groupes(donnees_std, segmentation['etiquettes'], noms_features)
     test_anomalies = detecter_anomalies_test(donnees_std, noms_agences, noms_features)
     anomalies = test_anomalies['signalees'] if test_anomalies else []
@@ -564,6 +583,7 @@ def analyser_reseau(annee, n_profils=3):
         'points': points,
         'anomalies': anomalies,
         'latents': latents,
+        'comparaison_espaces': comparaison_espaces,
     }
     resultat['test_anomalies'] = test_anomalies
     resultat['exp_anomalies'] = expliquer_anomalies(test_anomalies)

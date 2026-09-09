@@ -128,33 +128,46 @@
             </div>
         </div>
 
-               <details class="details-methode mt-3">
+        <details class="details-methode mt-2">
             <summary>Détails techniques</summary>
             <div class="bloc-methode">
-                Allocation de Dirichlet latente sur les comptages bruts.
-                Nombre de composantes choisi par minimisation de la perplexité
-                en validation croisée à {{ resultat.lda.n_plis }} plis :
-                {{ resultat.lda.k }} profils retenus, perplexité
-                {{ resultat.lda.perplexite }}.
+                Projection par analyse en composantes principales sur profils
+                standardisés, puis segmentation K-Means. Nombre de groupes choisi
+                par maximisation du score de silhouette.
+                <div class="mt-2">
+                    <div class="indicateur"><span>Agences analysées</span><span class="indicateur-valeur">{{ resultat.n_agences }}</span></div>
+                    <div class="indicateur"><span>Variables</span><span class="indicateur-valeur">{{ resultat.n_variables }}</span></div>
+                    <div class="indicateur"><span>Variance expliquée (2 axes)</span><span class="indicateur-valeur">{{ resultat.variance_totale }}%</span></div>
+                    <div class="indicateur"><span>Score de silhouette (k={{ resultat.k }})</span><span class="indicateur-valeur">{{ resultat.silhouette }}</span></div>
+                </div>
                 <div class="mt-2">
                     Balayage :
-                    {% for b in resultat.lda.balayage %}k={{ b.k }} → {{ b.perplexite }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    {% for b in resultat.balayage %}k={{ b.k }} → {{ b.silhouette }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                </div>
+                <div class="mt-2">
+                    {% for axe in resultat.axes %}
+                    Axe {{ axe.numero }} ({{ axe.variance }}%) :
+                    {% for v in axe.variables %}{{ v.nom }} ({{ v.poids }}){% if not forloop.last %}, {% endif %}{% endfor %}<br>
+                    {% endfor %}
+                </div>
+                <div class="mt-2">
+                    Les profils sont traités comme des données compositionnelles :
+                    transformation en log-rapport centré (Aitchison), les zéros
+                    étant remplacés par multiplication bayésienne. Les distances
+                    calculées sont ainsi des distances d'Aitchison, insensibles
+                    à la contrainte de somme des parts.
+                    {% if resultat.comparaison_espaces %}
                     <br>
-                    Écart relatif entre les valeurs extrêmes : {{ resultat.lda.etendue }} %.
-                    {% if resultat.lda.choix_net %}
-                        Le minimum est suffisamment marqué pour trancher.
-                    {% else %}
-                        Le balayage est plat : plusieurs valeurs de k conviennent
-                        presque aussi bien, la plus parcimonieuse a été retenue.
+                    Silhouette obtenue : {{ resultat.comparaison_espaces.coda }}
+                    avec ce traitement, contre
+                    {{ resultat.comparaison_espaces.classique }} sur les parts
+                    standardisées directement.
                     {% endif %}
                 </div>
                 <div class="mt-2">
-                    Une factorisation NMF est calculée en parallèle sur les parts
-                    d'activité (erreur de reconstruction {{ resultat.latents.erreur }}).
-                    Contrairement à elle, la LDA définit une vraisemblance, ce qui
-                    permet de choisir le nombre de profils par validation plutôt
-                    que de le fixer a priori ; elle travaille en outre sur les
-                    comptages, pondérant chaque agence par son volume.
+                    L'agence NEO-BTE est écartée de l'analyse : agence digitale sans
+                    activité de crédit propre, son profil n'est comparable à aucune
+                    agence physique.
                 </div>
             </div>
         </details>
@@ -303,11 +316,20 @@
             <div class="bloc-methode">
                 Allocation de Dirichlet latente sur les comptages bruts.
                 Nombre de composantes choisi par minimisation de la perplexité
-                en validation croisée à cinq plis : {{ resultat.lda.k }} profils
-                retenus, perplexité {{ resultat.lda.perplexite }}.
+                en validation croisée à {{ resultat.lda.n_plis }} plis :
+                {{ resultat.lda.k }} profils retenus, perplexité
+                {{ resultat.lda.perplexite }}.
                 <div class="mt-2">
                     Balayage :
                     {% for b in resultat.lda.balayage %}k={{ b.k }} → {{ b.perplexite }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                    <br>
+                    Écart relatif entre les valeurs extrêmes : {{ resultat.lda.etendue }} %.
+                    {% if resultat.lda.choix_net %}
+                        Le minimum est suffisamment marqué pour trancher.
+                    {% else %}
+                        Le balayage est plat : plusieurs valeurs conviennent presque
+                        aussi bien, la plus parcimonieuse a été retenue.
+                    {% endif %}
                 </div>
                 <div class="mt-2">
                     Une factorisation NMF est calculée en parallèle sur les parts
